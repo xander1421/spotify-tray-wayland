@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run go vet
+        working-directory: ./spotify-tray-wayland
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: ./spotify-tray-wayland
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Run staticcheck
+        working-directory: ./spotify-tray-wayland
+        run: staticcheck ./...
+
+      - name: Install nilaway
+        run: go install go.uber.org/nilaway/cmd/nilaway@latest
+
+      - name: Run nilaway
+        working-directory: ./spotify-tray-wayland
+        run: nilaway ./...
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        working-directory: ./spotify-tray-wayland
+        run: govulncheck ./...
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run tests with race detection
+        working-directory: ./spotify-tray-wayland
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: ./spotify-tray-wayland/coverage.out
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, security, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build
+        working-directory: ./spotify-tray-wayland
+        run: go build -v -o spotify-tray-wayland .
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotify-tray-wayland-linux-amd64
+          path: ./spotify-tray-wayland/spotify-tray-wayland
