@@ -134,3 +134,51 @@ jobs:
             dist/checksums.txt
             setup.sh
             uninstall.sh
+
+      - name: Update AUR PKGBUILD checksums
+        working-directory: .
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          AMD64_SHA=$(sha256sum dist/spotify-tray-wayland-linux-amd64 | cut -d' ' -f1)
+          ARM64_SHA=$(sha256sum dist/spotify-tray-wayland-linux-arm64 | cut -d' ' -f1)
+
+          # Update version and checksums in PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/spotify-tray-wayland-bin/PKGBUILD
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('$AMD64_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
+          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('$ARM64_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
+
+          # Generate .SRCINFO manually (no makepkg in CI)
+          cat > aur/spotify-tray-wayland-bin/.SRCINFO << EOF
+          pkgbase = spotify-tray-wayland-bin
+          	pkgdesc = Native Wayland/Hyprland system tray for Spotify with scroll and middle-click controls
+          	pkgver = $VERSION
+          	pkgrel = 1
+          	url = https://github.com/xander1421/spotify-tray-wayland
+          	install = spotify-tray-wayland-bin.install
+          	arch = x86_64
+          	arch = aarch64
+          	license = GPL3
+          	depends = dbus
+          	optdepends = spotify-launcher: official Spotify launcher
+          	optdepends = spotify: Spotify client (AUR)
+          	optdepends = hyprland: for window show/hide functionality
+          	provides = spotify-tray-wayland
+          	conflicts = spotify-tray-wayland
+          	conflicts = spotify-tray-wayland-git
+          	options = !debug
+          	source_x86_64 = spotify-tray-wayland-bin-$VERSION-x86_64::https://github.com/xander1421/spotify-tray-wayland/releases/download/v$VERSION/spotify-tray-wayland-linux-amd64
+          	sha256sums_x86_64 = $AMD64_SHA
+          	source_aarch64 = spotify-tray-wayland-bin-$VERSION-aarch64::https://github.com/xander1421/spotify-tray-wayland/releases/download/v$VERSION/spotify-tray-wayland-linux-arm64
+          	sha256sums_aarch64 = $ARM64_SHA
+
+          pkgname = spotify-tray-wayland-bin
+          EOF
+
+      - name: Commit and push PKGBUILD updates
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add aur/spotify-tray-wayland-bin/PKGBUILD aur/spotify-tray-wayland-bin/.SRCINFO
+          git commit -m "Update AUR checksums for ${GITHUB_REF#refs/tags/}" || exit 0
+          git push origin HEAD:main
