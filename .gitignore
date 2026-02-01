@@ -20,3 +20,9 @@ spotify-tray-wayland/spotify-tray-wayland
 # OS
 .DS_Store
 Thumbs.db
+
+# AUR build artifacts
+aur/*/pkg/
+aur/*/src/
+aur/*/*.pkg.tar*
+aur/*/spotify-tray-wayland-*-1.0.0-*

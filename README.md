@@ -24,8 +24,18 @@ A native system tray application for Spotify on Wayland, specifically designed f
 
 ## Installation
 
+### Arch Linux (AUR)
+
 ```bash
-git clone https://github.com/yourusername/spotify-tray-wayland.git
+yay -S spotify-tray-wayland-bin   # pre-built binary
+# or
+yay -S spotify-tray-wayland-git   # build from source
+```
+
+### Manual Installation
+
+```bash
+git clone https://github.com/xander1421/spotify-tray-wayland.git
 cd spotify-tray-wayland
 ./setup.sh
 ```
