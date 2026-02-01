@@ -279,15 +279,15 @@ func (a *App) toggleWindow() {
 
 func getSpotifyIcon() []byte {
 	home, _ := os.UserHomeDir()
+	// Prefer larger icons for better quality on HiDPI displays
 	iconPaths := []string{
-		"/usr/share/icons/hicolor/symbolic/apps/spotify-symbolic.svg",
-		"/usr/share/icons/hicolor/22x22/apps/spotify.png",
-		"/usr/share/icons/hicolor/24x24/apps/spotify.png",
-		"/usr/share/icons/hicolor/32x32/apps/spotify.png",
-		"/usr/share/icons/hicolor/48x48/apps/spotify.png",
+		"/usr/share/icons/hicolor/256x256/apps/spotify.png",
 		"/usr/share/icons/hicolor/128x128/apps/spotify.png",
-		home + "/.local/share/spotify-launcher/install/usr/share/spotify/icons/spotify-linux-32.png",
-		home + "/.local/share/spotify-launcher/install/usr/share/spotify/icons/spotify-linux-48.png",
+		"/usr/share/icons/hicolor/64x64/apps/spotify.png",
+		"/usr/share/icons/hicolor/48x48/apps/spotify.png",
+		"/usr/share/icons/hicolor/32x32/apps/spotify.png",
+		home + "/.local/share/spotify-launcher/install/usr/share/spotify/icons/spotify-linux-128.png",
+		home + "/.local/share/spotify-launcher/install/usr/share/spotify/icons/spotify-linux-64.png",
 	}
 
 	for _, path := range iconPaths {
