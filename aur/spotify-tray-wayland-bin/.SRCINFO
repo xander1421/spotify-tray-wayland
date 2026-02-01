@@ -16,8 +16,8 @@ pkgbase = spotify-tray-wayland-bin
 	conflicts = spotify-tray-wayland-git
 	options = !debug
 	source_x86_64 = spotify-tray-wayland-bin-1.0.1-x86_64::https://github.com/xander1421/spotify-tray-wayland/releases/download/v1.0.1/spotify-tray-wayland-linux-amd64
-	sha256sums_x86_64 = 4a15c90368bc80db119890b08d31104f6e4d244378c3f756e6d85cf2c611d573
+	sha256sums_x86_64 = 15f050b3b8f13bcbc9b589eba0e105c68a7d1178902c93449ef3c793dcc4d106
 	source_aarch64 = spotify-tray-wayland-bin-1.0.1-aarch64::https://github.com/xander1421/spotify-tray-wayland/releases/download/v1.0.1/spotify-tray-wayland-linux-arm64
-	sha256sums_aarch64 = 55f8277e86faf2e8806e192b70c5cc33d85c65db083c98989e884b4dfff5c24e
+	sha256sums_aarch64 = 3ea6e16bec9a11b3bf88449b05258b3320d8c2156877529bc03154c2c52946f5
 
 pkgname = spotify-tray-wayland-bin
