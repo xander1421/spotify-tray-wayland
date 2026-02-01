@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, master]
 
+defaults:
+  run:
+    working-directory: ./spotify-tray-wayland
+
 jobs:
   lint:
     name: Lint
@@ -17,9 +21,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+          cache-dependency-path: spotify-tray-wayland/go.sum
 
       - name: Run go vet
-        working-directory: ./spotify-tray-wayland
         run: go vet ./...
 
       - name: Run golangci-lint
@@ -32,14 +36,12 @@ jobs:
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Run staticcheck
-        working-directory: ./spotify-tray-wayland
         run: staticcheck ./...
 
       - name: Install nilaway
         run: go install go.uber.org/nilaway/cmd/nilaway@latest
 
       - name: Run nilaway
-        working-directory: ./spotify-tray-wayland
         run: nilaway ./...
 
   security:
@@ -52,12 +54,12 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+          cache-dependency-path: spotify-tray-wayland/go.sum
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run govulncheck
-        working-directory: ./spotify-tray-wayland
         run: govulncheck ./...
 
   test:
@@ -70,9 +72,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+          cache-dependency-path: spotify-tray-wayland/go.sum
 
       - name: Run tests with race detection
-        working-directory: ./spotify-tray-wayland
         run: go test -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage
@@ -92,9 +94,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+          cache-dependency-path: spotify-tray-wayland/go.sum
 
       - name: Build
-        working-directory: ./spotify-tray-wayland
         run: go build -v -o spotify-tray-wayland .
 
       - name: Upload binary
