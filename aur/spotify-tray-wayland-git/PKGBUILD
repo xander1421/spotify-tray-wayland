@@ -1,0 +1,60 @@
+# Maintainer: xander1421 <your-email@example.com>
+pkgname=spotify-tray-wayland-git
+pkgver=r1.8bec7a2
+pkgrel=1
+pkgdesc="Native Wayland/Hyprland system tray for Spotify with scroll and middle-click controls"
+arch=('x86_64' 'aarch64')
+url="https://github.com/xander1421/spotify-tray-wayland"
+license=('GPL3')
+depends=('dbus')
+makedepends=('go' 'git')
+optdepends=(
+    'spotify-launcher: official Spotify launcher'
+    'spotify: Spotify client (AUR)'
+    'hyprland: for window show/hide functionality'
+)
+provides=('spotify-tray-wayland')
+conflicts=('spotify-tray-wayland' 'spotify-tray-wayland-bin')
+source=("${pkgname}::git+https://github.com/xander1421/spotify-tray-wayland.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "${srcdir}/${pkgname}"
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cd "${srcdir}/${pkgname}/spotify-tray-wayland"
+    export CGO_ENABLED=0
+    go build -ldflags="-s -w" -o spotify-tray-wayland .
+}
+
+package() {
+    cd "${srcdir}/${pkgname}"
+    install -Dm755 "spotify-tray-wayland/spotify-tray-wayland" "${pkgdir}/usr/bin/spotify-tray-wayland"
+
+    # Create launcher script
+    install -Dm755 /dev/stdin "${pkgdir}/usr/bin/spotify-tray-launcher" << 'EOF'
+#!/usr/bin/env bash
+# Spotify Launcher - starts tray with Spotify
+if ! pgrep -f spotify-tray-wayland >/dev/null; then
+    /usr/bin/spotify-tray-wayland &
+fi
+exec spotify "$@"
+EOF
+
+    # Create desktop entry override
+    install -Dm644 /dev/stdin "${pkgdir}/usr/share/applications/spotify-tray.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=Spotify (with Tray)
+GenericName=Music Player
+Icon=spotify
+TryExec=spotify
+Exec=/usr/bin/spotify-tray-launcher %U
+Terminal=false
+MimeType=x-scheme-handler/spotify;
+Categories=Audio;Music;Player;AudioVideo;
+StartupWMClass=spotify
+EOF
+}

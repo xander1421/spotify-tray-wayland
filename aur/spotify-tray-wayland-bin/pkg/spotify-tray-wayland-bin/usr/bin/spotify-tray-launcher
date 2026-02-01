@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Spotify Launcher - starts tray with Spotify
+if ! pgrep -f spotify-tray-wayland >/dev/null; then
+    /usr/bin/spotify-tray-wayland &
+fi
+exec spotify "$@"
