@@ -13,6 +13,7 @@ A native system tray application for Spotify on Wayland, specifically designed f
   - Previous / Play-Pause / Next controls
   - Quit Spotify
 - **Window minimize**: Hide Spotify to a special workspace (like Windows minimize to tray)
+- **Smart close keybind**: Your existing "close window" keybind (auto-detected) minimizes Spotify to tray instead of killing it
 - **Auto-start**: Tray launches automatically with Spotify
 
 ## Requirements
@@ -32,6 +33,8 @@ yay -S spotify-tray-wayland-bin   # pre-built binary
 yay -S spotify-tray-wayland-git   # build from source
 ```
 
+Hyprland keybinds are configured automatically during installation.
+
 ### Manual Installation
 
 ```bash
@@ -41,11 +44,13 @@ cd spotify-tray-wayland
 ```
 
 The setup script will:
-1. Build the Go binary
-2. Install to `~/.local/bin/`
-3. Create a launcher script that starts the tray with Spotify
-4. Override the Spotify desktop entry to use the launcher
-5. Add Hyprland keybinds for window minimizing
+1. Detect your existing "close window" keybind from Hyprland config
+2. Build the Go binary
+3. Install to `~/.local/bin/`
+4. Create a launcher script that starts the tray with Spotify
+5. Override the Spotify desktop entry to use the launcher
+6. Install smart-close script that minimizes Spotify instead of killing it
+7. Add Hyprland keybinds for window minimizing
 
 ## Usage
 
@@ -64,8 +69,11 @@ After installation, just launch Spotify from your app menu. The tray icon will a
 
 | Shortcut | Action |
 |----------|--------|
+| Your close keybind* | Smart close: minimize Spotify to tray / kill other windows |
 | Super+M | Minimize focused window |
 | Super+` | Show minimized windows |
+
+*Auto-detected from your Hyprland config (usually Super+Q)
 
 ### Menu Options
 
@@ -87,19 +95,7 @@ This removes the binary, launcher, desktop entry override, and Hyprland config.
 1. **D-Bus/MPRIS**: Uses the MPRIS D-Bus interface to control Spotify playback and get track metadata
 2. **StatusNotifierItem**: Creates a system tray icon using the SNI protocol (native Wayland tray support)
 3. **Hyprland IPC**: Uses `hyprctl` to show/hide the Spotify window via special workspaces
-
-## Project Structure
-
-```
-spotify-tray-wayland/
-├── spotify-tray-wayland/   # Go source code
-│   ├── main.go             # Main application
-│   └── go.mod              # Go module definition
-├── setup.sh                # Installation script
-├── uninstall.sh            # Removal script
-├── LICENSE                 # GPL-3.0
-└── README.md
-```
+4. **Smart-close script**: Overrides Super+Q to detect if Spotify is focused—minimizes it to tray instead of killing, while preserving normal kill behavior for other windows
 
 ## Building Manually
 

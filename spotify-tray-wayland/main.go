@@ -55,10 +55,12 @@ func main() {
 		cancel: cancel,
 	}
 
-	// Handle signals
+	// Handle signals - tracked with WaitGroup for proper cleanup
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	app.wg.Add(1)
 	go func() {
+		defer app.wg.Done()
 		select {
 		case <-sigChan:
 			systray.Quit()
@@ -106,6 +108,9 @@ func (a *App) onReady() {
 		a.callMethod("PlayPause")
 	})
 
+	// Ensure Spotify is visible if already running but hidden
+	go a.ensureSpotifyVisible()
+
 	// Update tooltip with current track
 	a.wg.Add(2)
 	go a.updateLoop()
@@ -132,7 +137,13 @@ func (a *App) handleClicks() {
 		case <-a.mNext.ClickedCh:
 			a.callMethod("Next")
 		case <-a.mQuit.ClickedCh:
-			_ = exec.Command("pkill", "spotify").Run()
+			// Pause playback first (instant via D-Bus)
+			a.callMethod("Pause")
+			// Close window cleanly
+			_ = exec.Command("hyprctl", "dispatch", "closewindow", "class:spotify").Run()
+			time.Sleep(500 * time.Millisecond)
+			// Force kill if still running
+			_ = exec.Command("pkill", "-9", "spotify").Run()
 			systray.Quit()
 		}
 	}
@@ -274,7 +285,62 @@ func (a *App) toggleWindow() {
 	}
 
 	// Spotify not found, launch it
-	_ = exec.Command("spotify").Start()
+	cmd := exec.Command("spotify")
+	if err := cmd.Start(); err == nil {
+		// Wait in background to properly reap the process
+		go func() { _ = cmd.Wait() }()
+
+		// Wait for Spotify window to appear and ensure it's visible
+		go a.ensureSpotifyVisible()
+	}
+}
+
+// ensureSpotifyVisible waits for Spotify window to appear and moves it
+// to the current workspace if it spawned in a special workspace
+func (a *App) ensureSpotifyVisible() {
+	// Poll for up to 10 seconds for Spotify to appear
+	for i := 0; i < 100; i++ {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		out, err := exec.Command("hyprctl", "clients", "-j").Output()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "DEBUG: hyprctl error: %v\n", err)
+			continue
+		}
+
+		var clients []struct {
+			Address   string `json:"address"`
+			Class     string `json:"class"`
+			Workspace struct {
+				Name string `json:"name"`
+			} `json:"workspace"`
+		}
+
+		if err := json.Unmarshal(out, &clients); err != nil {
+			fmt.Fprintf(os.Stderr, "DEBUG: JSON error: %v\n", err)
+			continue
+		}
+
+		for _, client := range clients {
+			fmt.Fprintf(os.Stderr, "DEBUG: Found client class=%q workspace=%q\n", client.Class, client.Workspace.Name)
+			if strings.EqualFold(client.Class, "spotify") {
+				addr := "address:" + client.Address
+				fmt.Fprintf(os.Stderr, "DEBUG: Spotify found in workspace %q\n", client.Workspace.Name)
+				// If it spawned in special workspace, move it to current
+				if strings.HasPrefix(client.Workspace.Name, "special") {
+					fmt.Fprintf(os.Stderr, "DEBUG: Moving from special workspace\n")
+					_ = exec.Command("hyprctl", "dispatch", "movetoworkspacesilent", "e+0,"+addr).Run()
+					_ = exec.Command("hyprctl", "dispatch", "focuswindow", addr).Run()
+				}
+				return
+			}
+		}
+	}
+	fmt.Fprintf(os.Stderr, "DEBUG: Spotify not found after 10s\n")
 }
 
 func getSpotifyIcon() []byte {
