@@ -1,6 +1,6 @@
 module spotify-tray-wayland
 
-go 1.21
+go 1.25
 
 require (
 	fyne.io/systray v1.11.0
