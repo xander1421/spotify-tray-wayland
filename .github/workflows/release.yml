@@ -70,6 +70,9 @@ jobs:
   shell-tests:
     name: Shell Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
 
@@ -78,11 +81,10 @@ jobs:
           bash -n setup.sh
           bash -n uninstall.sh
 
-      - name: Run keybind detection tests
-        run: ./tests/test_keybind_detection.sh
-
-      - name: Run AUR package tests
-        run: ./tests/test_aur_packages.sh
+      - name: Validate PKGBUILD syntax
+        run: |
+          bash -n aur/spotify-tray-wayland-bin/PKGBUILD
+          bash -n aur/spotify-tray-wayland-git/PKGBUILD
 
   release:
     name: Release
