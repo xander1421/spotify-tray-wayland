@@ -248,6 +248,24 @@ func (a *App) updateTooltip() {
 	}
 }
 
+// moveWindowWithRetry moves a window to the target workspace with retry.
+// hyprctl returns "ok" on success, so we retry until we get that response.
+func (a *App) moveWindowWithRetry(addr, targetWorkspace string, shouldFocus bool) {
+	const maxRetries = 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		out, err := exec.Command("hyprctl", "dispatch", "movetoworkspacesilent", targetWorkspace+","+addr).Output()
+		if err == nil && strings.TrimSpace(string(out)) == "ok" {
+			if shouldFocus {
+				exec.Command("hyprctl", "dispatch", "focuswindow", addr).Run()
+			}
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Move attempt %d: %v (output: %q)\n", attempt, err, string(out))
+	}
+	fmt.Fprintf(os.Stderr, "Failed to move window after %d attempts\n", maxRetries)
+}
+
 func (a *App) toggleWindow() {
 	out, err := exec.Command("hyprctl", "clients", "-j").Output()
 	if err != nil {
@@ -274,11 +292,10 @@ func (a *App) toggleWindow() {
 			addr := "address:" + client.Address
 			if strings.HasPrefix(client.Workspace.Name, "special") {
 				// Show: move from special workspace to current
-				_ = exec.Command("hyprctl", "dispatch", "movetoworkspacesilent", "e+0,"+addr).Run()
-				_ = exec.Command("hyprctl", "dispatch", "focuswindow", addr).Run()
+				a.moveWindowWithRetry(addr, "e+0", true)
 			} else {
 				// Hide: move to special workspace
-				_ = exec.Command("hyprctl", "dispatch", "movetoworkspacesilent", "special:spotify,"+addr).Run()
+				a.moveWindowWithRetry(addr, "special:spotify", false)
 			}
 			return
 		}
@@ -326,15 +343,12 @@ func (a *App) ensureSpotifyVisible() {
 		}
 
 		for _, client := range clients {
-			fmt.Fprintf(os.Stderr, "DEBUG: Found client class=%q workspace=%q\n", client.Class, client.Workspace.Name)
 			if strings.EqualFold(client.Class, "spotify") {
 				addr := "address:" + client.Address
-				fmt.Fprintf(os.Stderr, "DEBUG: Spotify found in workspace %q\n", client.Workspace.Name)
 				// If it spawned in special workspace, move it to current
 				if strings.HasPrefix(client.Workspace.Name, "special") {
-					fmt.Fprintf(os.Stderr, "DEBUG: Moving from special workspace\n")
-					_ = exec.Command("hyprctl", "dispatch", "movetoworkspacesilent", "e+0,"+addr).Run()
-					_ = exec.Command("hyprctl", "dispatch", "focuswindow", addr).Run()
+					fmt.Fprintf(os.Stderr, "DEBUG: Spotify spawned in special workspace, moving to current\n")
+					a.moveWindowWithRetry(addr, "e+0", true)
 				}
 				return
 			}
