@@ -1,39 +1,56 @@
 name: Auto Release
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    paths:
-      - 'spotify-tray-wayland/**'
-      - 'setup.sh'
-      - 'uninstall.sh'
+
+permissions:
+  contents: write
 
 jobs:
   auto-release:
     name: Create Release Tag
     runs-on: ubuntu-latest
-    # Skip if commit is from bot (AUR checksum updates)
-    if: "!contains(github.event.head_commit.message, 'Update AUR checksums')"
+    # Only run if CI passed and it was a code change (not bot commit)
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      !contains(github.event.workflow_run.head_commit.message, 'Update AUR checksums')
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if code files changed
+        id: changes
+        run: |
+          # Get the commit SHA from the workflow run
+          COMMIT_SHA="${{ github.event.workflow_run.head_sha }}"
+
+          # Check if relevant files changed in this commit
+          CHANGED=$(git diff-tree --no-commit-id --name-only -r $COMMIT_SHA | grep -E '^spotify-tray-wayland/|^setup\.sh$|^uninstall\.sh$' || true)
+
+          if [ -n "$CHANGED" ]; then
+            echo "Code files changed, will create release"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "No code files changed, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Get latest tag and bump version
         id: version
+        if: steps.changes.outputs.should_release == 'true'
         run: |
-          # Get latest tag
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "Latest tag: $LATEST_TAG"
 
-          # Parse version (remove 'v' prefix)
           VERSION=${LATEST_TAG#v}
           MAJOR=$(echo $VERSION | cut -d. -f1)
           MINOR=$(echo $VERSION | cut -d. -f2)
           PATCH=$(echo $VERSION | cut -d. -f3)
 
-          # Bump patch version
           NEW_PATCH=$((PATCH + 1))
           NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
 
@@ -41,6 +58,7 @@ jobs:
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Create and push tag
+        if: steps.changes.outputs.should_release == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
