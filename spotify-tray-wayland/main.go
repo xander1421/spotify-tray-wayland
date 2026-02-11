@@ -14,7 +14,11 @@ import (
 	"fyne.io/systray"
 )
 
-const updateInterval = 3 * time.Second
+const (
+	updateInterval     = 3 * time.Second
+	specialWorkspace   = "special:spotify"
+	currentWorkspace   = "e+0" // Hyprland: relative to current
+)
 
 // App holds the application state with dependency injection
 type App struct {
@@ -222,12 +226,12 @@ func (a *App) toggleWindow() {
 
 			if strings.HasPrefix(client.Workspace.Name, "special") {
 				// Show: move from special workspace to current
-				if err := a.wm.MoveWindow(addr, "e+0"); err == nil {
+				if err := a.wm.MoveWindow(addr, currentWorkspace); err == nil {
 					_ = a.wm.FocusWindow(addr)
 				}
 			} else {
 				// Hide: move to special workspace
-				_ = a.wm.MoveWindow(addr, "special:spotify")
+				_ = a.wm.MoveWindow(addr, specialWorkspace)
 			}
 			return
 		}
@@ -263,7 +267,7 @@ func (a *App) ensureSpotifyVisible(forceMove bool) {
 					addr := "address:" + client.Address
 					// If it spawned in special workspace, move it to current
 					if forceMove && strings.HasPrefix(client.Workspace.Name, "special") {
-						if err := a.wm.MoveWindow(addr, "e+0"); err == nil {
+						if err := a.wm.MoveWindow(addr, currentWorkspace); err == nil {
 							_ = a.wm.FocusWindow(addr)
 						}
 					}
