@@ -182,3 +182,29 @@ jobs:
           git add aur/spotify-tray-wayland-bin/PKGBUILD aur/spotify-tray-wayland-bin/.SRCINFO
           git commit -m "Update AUR checksums for ${GITHUB_REF#refs/tags/}" || exit 0
           git push origin HEAD:main
+
+      - name: Publish to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          # Setup SSH for AUR
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          echo "Host aur.archlinux.org" >> ~/.ssh/config
+          echo "  IdentityFile ~/.ssh/aur" >> ~/.ssh/config
+          echo "  User aur" >> ~/.ssh/config
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Clone AUR repo and update
+          git clone ssh://aur@aur.archlinux.org/spotify-tray-wayland-bin.git aur-repo
+          cp aur/spotify-tray-wayland-bin/PKGBUILD aur-repo/
+          cp aur/spotify-tray-wayland-bin/.SRCINFO aur-repo/
+          cp aur/spotify-tray-wayland-bin/*.install aur-repo/ 2>/dev/null || true
+
+          cd aur-repo
+          git config user.name "xander1421"
+          git config user.email "alexpruteanu@hotmail.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "Update to ${GITHUB_REF#refs/tags/}"
+          git push
