@@ -208,19 +208,20 @@ jobs:
             setup.sh
             uninstall.sh
 
-      - name: Update AUR PKGBUILD checksums
+      - name: Update AUR PKGBUILDs
         working-directory: .
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           AMD64_SHA=$(sha256sum dist/spotify-tray-wayland-linux-amd64 | cut -d' ' -f1)
           ARM64_SHA=$(sha256sum dist/spotify-tray-wayland-linux-arm64 | cut -d' ' -f1)
+          GIT_REV=$(git rev-list --count HEAD)
+          GIT_SHA=$(git rev-parse --short HEAD)
 
-          # Update version and checksums in PKGBUILD
+          # === Update -bin package ===
           sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/spotify-tray-wayland-bin/PKGBUILD
           sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('$AMD64_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
           sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('$ARM64_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
 
-          # Generate .SRCINFO manually (no makepkg in CI)
           cat > aur/spotify-tray-wayland-bin/.SRCINFO << EOF
           pkgbase = spotify-tray-wayland-bin
           	pkgdesc = Native Wayland/Hyprland system tray for Spotify with scroll and middle-click controls
@@ -247,12 +248,42 @@ jobs:
           pkgname = spotify-tray-wayland-bin
           EOF
 
+          # === Update -git package ===
+          sed -i "s/^pkgver=.*/pkgver=r${GIT_REV}.${GIT_SHA}/" aur/spotify-tray-wayland-git/PKGBUILD
+
+          cat > aur/spotify-tray-wayland-git/.SRCINFO << EOF
+          pkgbase = spotify-tray-wayland-git
+          	pkgdesc = Native Wayland/Hyprland system tray for Spotify with scroll and middle-click controls
+          	pkgver = r${GIT_REV}.${GIT_SHA}
+          	pkgrel = 1
+          	url = https://github.com/xander1421/spotify-tray-wayland
+          	install = spotify-tray-wayland-git.install
+          	arch = x86_64
+          	arch = aarch64
+          	license = GPL3
+          	makedepends = go
+          	makedepends = git
+          	depends = dbus
+          	optdepends = spotify-launcher: official Spotify launcher
+          	optdepends = spotify: Spotify client (AUR)
+          	optdepends = hyprland: for window show/hide functionality
+          	provides = spotify-tray-wayland
+          	conflicts = spotify-tray-wayland
+          	conflicts = spotify-tray-wayland-bin
+          	options = !debug
+          	source = spotify-tray-wayland-git::git+https://github.com/xander1421/spotify-tray-wayland.git
+          	sha256sums = SKIP
+
+          pkgname = spotify-tray-wayland-git
+          EOF
+
       - name: Commit and push PKGBUILD updates
         working-directory: .
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add aur/spotify-tray-wayland-bin/PKGBUILD aur/spotify-tray-wayland-bin/.SRCINFO
+          git add aur/spotify-tray-wayland-git/PKGBUILD aur/spotify-tray-wayland-git/.SRCINFO
           git commit -m "Update AUR checksums for ${GITHUB_REF#refs/tags/}" || exit 0
           git push origin HEAD:main
 
@@ -270,13 +301,25 @@ jobs:
           echo "  User aur" >> ~/.ssh/config
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
 
-          # Clone AUR repo and update
-          git clone ssh://aur@aur.archlinux.org/spotify-tray-wayland-bin.git aur-repo
-          cp aur/spotify-tray-wayland-bin/PKGBUILD aur-repo/
-          cp aur/spotify-tray-wayland-bin/.SRCINFO aur-repo/
-          cp aur/spotify-tray-wayland-bin/*.install aur-repo/ 2>/dev/null || true
+          # === Publish -bin package ===
+          git clone ssh://aur@aur.archlinux.org/spotify-tray-wayland-bin.git aur-bin
+          cp aur/spotify-tray-wayland-bin/PKGBUILD aur-bin/
+          cp aur/spotify-tray-wayland-bin/.SRCINFO aur-bin/
+          cp aur/spotify-tray-wayland-bin/*.install aur-bin/ 2>/dev/null || true
+          cd aur-bin
+          git config user.name "xander1421"
+          git config user.email "alexpruteanu@hotmail.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "Update to ${GITHUB_REF#refs/tags/}"
+          git push
+          cd ..
 
-          cd aur-repo
+          # === Publish -git package ===
+          git clone ssh://aur@aur.archlinux.org/spotify-tray-wayland-git.git aur-git
+          cp aur/spotify-tray-wayland-git/PKGBUILD aur-git/
+          cp aur/spotify-tray-wayland-git/.SRCINFO aur-git/
+          cp aur/spotify-tray-wayland-git/*.install aur-git/ 2>/dev/null || true
+          cd aur-git
           git config user.name "xander1421"
           git config user.email "alexpruteanu@hotmail.com"
           git add -A
