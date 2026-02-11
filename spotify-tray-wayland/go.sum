@@ -1,6 +1,6 @@
 github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
 github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
-github.com/xander1421/systray v1.14.0 h1:Pr18srknBtpktaNYzN2bNwx8OQRjZmJ8KIrzobw7fY4=
-github.com/xander1421/systray v1.14.0/go.mod h1:QgsHWXaT78UEg/fGm80TcbHk8ascVIDlfnBJsc0xYtI=
+github.com/xander1421/systray v1.15.0 h1:pSOUJ+JVfIvU7mW4kkzOiX3Ozay0GXaj/ZxxoIc8hHE=
+github.com/xander1421/systray v1.15.0/go.mod h1:4WAiiGXfZHlsrn1AwBlYbDFiCkhSR1fsSFpdYX7ARBI=
 golang.org/x/sys v0.41.0 h1:Ivj+2Cp/ylzLiEU89QhWblYnOE9zerudt9Ftecq2C6k=
 golang.org/x/sys v0.41.0/go.mod h1:OgkHotnGiDImocRcuBABYBEXf8A9a87e/uXjp9XT3ks=

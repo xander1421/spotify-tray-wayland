@@ -2,19 +2,286 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
 )
 
-// TestUpdateLoopExits verifies updateLoop exits when context is cancelled
+// --- MOCKS ---
+
+type MockWindowManager struct {
+	Clients       []HyprlandClient
+	MoveCalls     []string
+	FocusCalls    []string
+	CloseCalls    []string
+	LaunchCalled  bool
+	GetClientsErr error
+}
+
+func (m *MockWindowManager) GetClients() ([]HyprlandClient, error) {
+	if m.GetClientsErr != nil {
+		return nil, m.GetClientsErr
+	}
+	return m.Clients, nil
+}
+
+func (m *MockWindowManager) MoveWindow(addr, workspace string) error {
+	m.MoveCalls = append(m.MoveCalls, "move "+addr+" to "+workspace)
+	return nil
+}
+
+func (m *MockWindowManager) FocusWindow(addr string) error {
+	m.FocusCalls = append(m.FocusCalls, "focus "+addr)
+	return nil
+}
+
+func (m *MockWindowManager) CloseWindow(class string) error {
+	m.CloseCalls = append(m.CloseCalls, "close "+class)
+	return nil
+}
+
+func (m *MockWindowManager) LaunchSpotify() error {
+	m.LaunchCalled = true
+	return nil
+}
+
+type MockMediaPlayer struct {
+	Artist      string
+	Title       string
+	Status      string
+	CallHistory []string
+}
+
+func (m *MockMediaPlayer) GetMetadata() (artist, title, status string, err error) {
+	return m.Artist, m.Title, m.Status, nil
+}
+
+func (m *MockMediaPlayer) Call(method string) error {
+	m.CallHistory = append(m.CallHistory, method)
+	return nil
+}
+
+func (m *MockMediaPlayer) Close() {}
+
+// --- TOGGLE WINDOW TESTS ---
+
+func TestToggleWindow_Unhide(t *testing.T) {
+	mockWM := &MockWindowManager{
+		Clients: []HyprlandClient{
+			{
+				Class:   "Spotify",
+				Address: "0x123",
+				Workspace: struct {
+					ID   int
+					Name string
+				}{Name: "special:spotify"},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testApp := &App{
+		wm:     mockWM,
+		player: &MockMediaPlayer{},
+		ctx:    ctx,
+		cancel: cancel,
+	}
+
+	testApp.toggleWindow()
+
+	if len(mockWM.MoveCalls) != 1 {
+		t.Fatalf("Expected 1 move call, got %d", len(mockWM.MoveCalls))
+	}
+
+	expected := "move address:0x123 to e+0"
+	if mockWM.MoveCalls[0] != expected {
+		t.Errorf("Expected '%s', got '%s'", expected, mockWM.MoveCalls[0])
+	}
+
+	if len(mockWM.FocusCalls) != 1 {
+		t.Errorf("Expected 1 focus call, got %d", len(mockWM.FocusCalls))
+	}
+}
+
+func TestToggleWindow_Hide(t *testing.T) {
+	mockWM := &MockWindowManager{
+		Clients: []HyprlandClient{
+			{
+				Class:   "Spotify",
+				Address: "0xABC",
+				Workspace: struct {
+					ID   int
+					Name string
+				}{Name: "1"},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testApp := &App{
+		wm:     mockWM,
+		player: &MockMediaPlayer{},
+		ctx:    ctx,
+		cancel: cancel,
+	}
+
+	testApp.toggleWindow()
+
+	expected := "move address:0xABC to special:spotify"
+	if len(mockWM.MoveCalls) == 0 || mockWM.MoveCalls[0] != expected {
+		t.Errorf("Expected '%s', got %v", expected, mockWM.MoveCalls)
+	}
+
+	// Should not focus when hiding
+	if len(mockWM.FocusCalls) != 0 {
+		t.Errorf("Expected no focus calls when hiding, got %d", len(mockWM.FocusCalls))
+	}
+}
+
+func TestToggleWindow_Launch(t *testing.T) {
+	mockWM := &MockWindowManager{
+		Clients: []HyprlandClient{},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testApp := &App{
+		wm:     mockWM,
+		player: &MockMediaPlayer{},
+		ctx:    ctx,
+		cancel: cancel,
+	}
+
+	testApp.toggleWindow()
+
+	if !mockWM.LaunchCalled {
+		t.Error("Expected Spotify to be launched, but it wasn't")
+	}
+}
+
+func TestToggleWindow_CaseInsensitive(t *testing.T) {
+	testCases := []string{"spotify", "Spotify", "SPOTIFY", "SpOtIfY"}
+
+	for _, className := range testCases {
+		t.Run(className, func(t *testing.T) {
+			mockWM := &MockWindowManager{
+				Clients: []HyprlandClient{
+					{
+						Class:   className,
+						Address: "0x999",
+						Workspace: struct {
+							ID   int
+							Name string
+						}{Name: "2"},
+					},
+				},
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			testApp := &App{
+				wm:     mockWM,
+				player: &MockMediaPlayer{},
+				ctx:    ctx,
+				cancel: cancel,
+			}
+
+			testApp.toggleWindow()
+
+			if len(mockWM.MoveCalls) != 1 {
+				t.Errorf("Class '%s': Expected 1 move call, got %d", className, len(mockWM.MoveCalls))
+			}
+		})
+	}
+}
+
+// --- HYPRLAND PARSER TESTS ---
+
+func TestParseHyprctlClients(t *testing.T) {
+	input := `Window 560770936780 -> alex@myhostname:~:
+	mapped: 1
+	hidden: 0
+	at: 2763,405
+	size: 2662,1404
+	workspace: -98 (special:scratchpad)
+	floating: 1
+	class: kitty
+	title: alex@myhostname:~
+
+Window 560770e3b350 -> Spotify:
+	mapped: 1
+	hidden: 0
+	workspace: 1 (1)
+	class: Spotify
+	title: Spotify Premium
+`
+
+	clients := parseHyprctlClients([]byte(input))
+
+	if len(clients) != 2 {
+		t.Fatalf("Expected 2 clients, got %d", len(clients))
+	}
+
+	// First client
+	if clients[0].Class != "kitty" {
+		t.Errorf("Expected class 'kitty', got '%s'", clients[0].Class)
+	}
+	if clients[0].Address != "0x560770936780" {
+		t.Errorf("Expected address '0x560770936780', got '%s'", clients[0].Address)
+	}
+	if clients[0].Workspace.Name != "special:scratchpad" {
+		t.Errorf("Expected workspace 'special:scratchpad', got '%s'", clients[0].Workspace.Name)
+	}
+	if clients[0].Workspace.ID != -98 {
+		t.Errorf("Expected workspace ID -98, got %d", clients[0].Workspace.ID)
+	}
+
+	// Second client (Spotify)
+	if clients[1].Class != "Spotify" {
+		t.Errorf("Expected class 'Spotify', got '%s'", clients[1].Class)
+	}
+	if clients[1].Workspace.Name != "1" {
+		t.Errorf("Expected workspace '1', got '%s'", clients[1].Workspace.Name)
+	}
+}
+
+func TestParseHyprctlClients_Empty(t *testing.T) {
+	clients := parseHyprctlClients([]byte(""))
+	if len(clients) != 0 {
+		t.Errorf("Expected 0 clients from empty input, got %d", len(clients))
+	}
+}
+
+func TestParseHyprctlClients_SingleClient(t *testing.T) {
+	input := `Window abc123 -> Test Window:
+	class: testclass
+	workspace: 5 (myworkspace)
+`
+	clients := parseHyprctlClients([]byte(input))
+
+	if len(clients) != 1 {
+		t.Fatalf("Expected 1 client, got %d", len(clients))
+	}
+	if clients[0].Class != "testclass" {
+		t.Errorf("Expected class 'testclass', got '%s'", clients[0].Class)
+	}
+}
+
+// --- LIFECYCLE TESTS ---
+
 func TestUpdateLoopExits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	testApp := &App{
 		ctx:    ctx,
 		cancel: cancel,
+		player: &MockMediaPlayer{},
 	}
 
 	goroutinesBefore := runtime.NumGoroutine()
@@ -22,10 +289,7 @@ func TestUpdateLoopExits(t *testing.T) {
 	testApp.wg.Add(1)
 	go testApp.updateLoop()
 
-	// Let it run briefly
 	time.Sleep(50 * time.Millisecond)
-
-	// Cancel and wait
 	cancel()
 
 	done := make(chan struct{})
@@ -36,81 +300,17 @@ func TestUpdateLoopExits(t *testing.T) {
 
 	select {
 	case <-done:
-		// Success
 	case <-time.After(time.Second):
 		t.Fatal("updateLoop did not exit within timeout")
 	}
 
-	// Allow goroutines to clean up
 	time.Sleep(50 * time.Millisecond)
-
 	goroutinesAfter := runtime.NumGoroutine()
 	if goroutinesAfter > goroutinesBefore+1 {
 		t.Errorf("goroutine leak: before=%d, after=%d", goroutinesBefore, goroutinesAfter)
 	}
 }
 
-// TestHandleClicksWithMockChannels tests the click handler loop logic
-func TestHandleClicksWithMockChannels(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Create mock channels
-	showHideCh := make(chan struct{})
-	prevCh := make(chan struct{})
-	playPauseCh := make(chan struct{})
-	nextCh := make(chan struct{})
-	quitCh := make(chan struct{})
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	// Test loop using mock channels
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-showHideCh:
-			case <-prevCh:
-			case <-playPauseCh:
-			case <-nextCh:
-			case <-quitCh:
-			}
-		}
-	}()
-
-	goroutinesBefore := runtime.NumGoroutine()
-
-	// Let it run briefly
-	time.Sleep(50 * time.Millisecond)
-
-	// Cancel and wait
-	cancel()
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success
-	case <-time.After(time.Second):
-		t.Fatal("handleClicks loop did not exit within timeout")
-	}
-
-	// Allow goroutines to clean up
-	time.Sleep(50 * time.Millisecond)
-
-	goroutinesAfter := runtime.NumGoroutine()
-	if goroutinesAfter > goroutinesBefore {
-		t.Errorf("goroutine leak: before=%d, after=%d", goroutinesBefore, goroutinesAfter)
-	}
-}
-
-// TestMultipleStartStop tests starting and stopping multiple times
 func TestMultipleStartStop(t *testing.T) {
 	goroutinesBefore := runtime.NumGoroutine()
 
@@ -119,6 +319,7 @@ func TestMultipleStartStop(t *testing.T) {
 		testApp := &App{
 			ctx:    ctx,
 			cancel: cancel,
+			player: &MockMediaPlayer{},
 		}
 
 		testApp.wg.Add(1)
@@ -129,56 +330,24 @@ func TestMultipleStartStop(t *testing.T) {
 		testApp.wg.Wait()
 	}
 
-	// Allow cleanup
 	time.Sleep(100 * time.Millisecond)
-
 	goroutinesAfter := runtime.NumGoroutine()
 	if goroutinesAfter > goroutinesBefore+2 {
 		t.Errorf("goroutine leak after multiple cycles: before=%d, after=%d", goroutinesBefore, goroutinesAfter)
 	}
 }
 
-// TestWaitGroupCorrectness ensures WaitGroup is properly decremented
-func TestWaitGroupCorrectness(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	testApp := &App{
-		ctx:    ctx,
-		cancel: cancel,
-	}
-
-	testApp.wg.Add(1)
-	go testApp.updateLoop()
-
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	// This should not deadlock
-	done := make(chan struct{})
-	go func() {
-		testApp.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success
-	case <-time.After(2 * time.Second):
-		t.Fatal("WaitGroup.Wait() deadlocked - wg.Done() not called")
-	}
-}
-
-// TestConcurrentShutdown tests that shutdown is safe when called concurrently
 func TestConcurrentShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	testApp := &App{
 		ctx:    ctx,
 		cancel: cancel,
+		player: &MockMediaPlayer{},
 	}
 
 	testApp.wg.Add(1)
 	go testApp.updateLoop()
 
-	// Multiple goroutines calling cancel
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -189,7 +358,6 @@ func TestConcurrentShutdown(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Should complete without panic or deadlock
 	done := make(chan struct{})
 	go func() {
 		testApp.wg.Wait()
@@ -198,82 +366,12 @@ func TestConcurrentShutdown(t *testing.T) {
 
 	select {
 	case <-done:
-		// Success
 	case <-time.After(2 * time.Second):
 		t.Fatal("concurrent shutdown caused deadlock")
 	}
 }
 
-// TestToggleWindowParsing tests JSON parsing in toggleWindow
-func TestToggleWindowParsing(t *testing.T) {
-	testCases := []struct {
-		name    string
-		json    string
-		wantErr bool
-		wantLen int
-	}{
-		{
-			name:    "empty array",
-			json:    "[]",
-			wantErr: false,
-			wantLen: 0,
-		},
-		{
-			name:    "single spotify client",
-			json:    `[{"address":"0x123","class":"Spotify","workspace":{"id":1,"name":"1"}}]`,
-			wantErr: false,
-			wantLen: 1,
-		},
-		{
-			name:    "spotify in special workspace",
-			json:    `[{"address":"0x456","class":"spotify","workspace":{"id":-1,"name":"special:spotify"}}]`,
-			wantErr: false,
-			wantLen: 1,
-		},
-		{
-			name:    "invalid json",
-			json:    "{invalid}",
-			wantErr: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var clients []struct {
-				Address   string `json:"address"`
-				Class     string `json:"class"`
-				Workspace struct {
-					ID   int    `json:"id"`
-					Name string `json:"name"`
-				} `json:"workspace"`
-			}
-
-			err := json.Unmarshal([]byte(tc.json), &clients)
-			if (err != nil) != tc.wantErr {
-				t.Errorf("Unmarshal error = %v, wantErr %v", err, tc.wantErr)
-			}
-			if !tc.wantErr && len(clients) != tc.wantLen {
-				t.Errorf("got %d clients, want %d", len(clients), tc.wantLen)
-			}
-		})
-	}
-}
-
-// TestGetSpotifyIcon tests icon loading doesn't panic
-func TestGetSpotifyIcon(t *testing.T) {
-	// Should not panic even if no icons exist
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("getSpotifyIcon panicked: %v", r)
-		}
-	}()
-
-	_ = getSpotifyIcon()
-}
-
-// TestGoroutineLeakOnRapidCancelation tests for leaks with rapid start/stop
 func TestGoroutineLeakOnRapidCancelation(t *testing.T) {
-	// Warm up the runtime
 	runtime.GC()
 	time.Sleep(50 * time.Millisecond)
 
@@ -284,17 +382,16 @@ func TestGoroutineLeakOnRapidCancelation(t *testing.T) {
 		testApp := &App{
 			ctx:    ctx,
 			cancel: cancel,
+			player: &MockMediaPlayer{},
 		}
 
 		testApp.wg.Add(1)
 		go testApp.updateLoop()
 
-		// Immediate cancel
 		cancel()
 		testApp.wg.Wait()
 	}
 
-	// Force GC and allow cleanup
 	runtime.GC()
 	time.Sleep(100 * time.Millisecond)
 
@@ -305,48 +402,61 @@ func TestGoroutineLeakOnRapidCancelation(t *testing.T) {
 	}
 }
 
-// TestTickerCleanup ensures ticker is properly stopped
-func TestTickerCleanup(t *testing.T) {
+func TestGetSpotifyIcon(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("getSpotifyIcon panicked: %v", r)
+		}
+	}()
+
+	_ = getSpotifyIcon()
+}
+
+// --- BENCHMARKS ---
+
+func BenchmarkParseHyprctlClients(b *testing.B) {
+	input := []byte(`Window 560770936780 -> Window 1:
+	class: class1
+	workspace: 1 (workspace1)
+
+Window 560770936781 -> Window 2:
+	class: class2
+	workspace: 2 (workspace2)
+
+Window 560770936782 -> Window 3:
+	class: Spotify
+	workspace: -99 (special:spotify)
+`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClients(input)
+	}
+}
+
+func BenchmarkToggleWindow(b *testing.B) {
+	mockWM := &MockWindowManager{
+		Clients: []HyprlandClient{
+			{Class: "Spotify", Address: "0x123", Workspace: struct {
+				ID   int
+				Name string
+			}{Name: "1"}},
+		},
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	testApp := &App{
+		wm:     mockWM,
+		player: &MockMediaPlayer{},
 		ctx:    ctx,
 		cancel: cancel,
 	}
 
-	testApp.wg.Add(1)
-	go testApp.updateLoop()
-
-	// Let ticker tick at least once
-	time.Sleep(50 * time.Millisecond)
-
-	cancel()
-	testApp.wg.Wait()
-
-	// If ticker wasn't stopped, we'd see resource leaks over time
-	// This test mainly ensures no panic on cleanup
-}
-
-// BenchmarkGoroutineStartStop benchmarks goroutine lifecycle
-func BenchmarkGoroutineStartStop(b *testing.B) {
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-		testApp := &App{
-			ctx:    ctx,
-			cancel: cancel,
-		}
-
-		testApp.wg.Add(1)
-		go testApp.updateLoop()
-		cancel()
-		testApp.wg.Wait()
-	}
-}
-
-// BenchmarkContextCancelation benchmarks context cancelation overhead
-func BenchmarkContextCancelation(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		<-ctx.Done()
+		mockWM.MoveCalls = nil
+		testApp.toggleWindow()
 	}
 }

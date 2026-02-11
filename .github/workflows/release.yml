@@ -22,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache-dependency-path: spotify-tray-wayland/go.sum
 
       - name: Run go vet
@@ -43,7 +43,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache-dependency-path: spotify-tray-wayland/go.sum
 
       - name: Install govulncheck
@@ -61,7 +61,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache-dependency-path: spotify-tray-wayland/go.sum
 
       - name: Run tests with race detection
@@ -98,7 +98,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache-dependency-path: spotify-tray-wayland/go.sum
 
       - name: Get version

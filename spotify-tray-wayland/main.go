@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"sync"
@@ -13,19 +12,15 @@ import (
 	"time"
 
 	"fyne.io/systray"
-	"github.com/godbus/dbus/v5"
 )
 
-const (
-	spotifyDest     = "org.mpris.MediaPlayer2.spotify"
-	spotifyObjPath  = "/org/mpris/MediaPlayer2"
-	playerInterface = "org.mpris.MediaPlayer2.Player"
-	updateInterval  = 3 * time.Second
-)
+const updateInterval = 3 * time.Second
 
-// App holds the application state
+// App holds the application state with dependency injection
 type App struct {
-	conn       *dbus.Conn
+	wm     WindowManager
+	player MediaPlayer
+
 	mTrackInfo *systray.MenuItem
 	mShowHide  *systray.MenuItem
 	mPrev      *systray.MenuItem
@@ -41,26 +36,26 @@ type App struct {
 var app *App
 
 func main() {
-	conn, err := dbus.ConnectSessionBus()
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	player, err := NewDBusPlayer()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to connect to D-Bus: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to connect to D-Bus: %v", err)
 	}
-	defer conn.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	app = &App{
-		conn:   conn,
+		wm:     NewHyprlandManager(),
+		player: player,
 		ctx:    ctx,
 		cancel: cancel,
 	}
 
-	// Handle signals - tracked with WaitGroup for proper cleanup
+	// Handle signals - NOT in WaitGroup to avoid deadlock
+	// (systray.Quit -> onExit -> wg.Wait would deadlock if this goroutine is in wg)
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	app.wg.Add(1)
 	go func() {
-		defer app.wg.Done()
 		select {
 		case <-sigChan:
 			systray.Quit()
@@ -73,7 +68,12 @@ func main() {
 }
 
 func (a *App) onReady() {
-	systray.SetIcon(getSpotifyIcon())
+	icon := getSpotifyIcon()
+	if icon != nil {
+		systray.SetIcon(icon)
+	} else {
+		systray.SetTitle("Spo")
+	}
 	systray.SetTitle("Spotify")
 	systray.SetTooltip("Spotify - Click for controls")
 
@@ -93,25 +93,29 @@ func (a *App) onReady() {
 	systray.AddSeparator()
 	a.mQuit = systray.AddMenuItem("Quit", "Quit Spotify")
 
-	// Set up scroll handler: scroll up = next, scroll down = previous
+	// Non-blocking scroll handler
 	systray.SetOnScroll(func(direction systray.ScrollDirection) {
-		switch direction {
-		case systray.ScrollUp:
-			a.callMethod("Next")
-		case systray.ScrollDown:
-			a.callMethod("Previous")
-		}
+		go func() {
+			switch direction {
+			case systray.ScrollUp:
+				_ = a.player.Call("Next")
+			case systray.ScrollDown:
+				_ = a.player.Call("Previous")
+			}
+		}()
 	})
 
-	// Set up middle-click handler: play/pause
+	// Non-blocking middle-click handler
 	systray.SetOnMiddleTapped(func() {
-		a.callMethod("PlayPause")
+		go func() {
+			_ = a.player.Call("PlayPause")
+		}()
 	})
 
 	// Ensure Spotify is visible if already running but hidden
-	go a.ensureSpotifyVisible()
+	go a.ensureSpotifyVisible(false)
 
-	// Update tooltip with current track
+	// Start background loops
 	a.wg.Add(2)
 	go a.updateLoop()
 	go a.handleClicks()
@@ -119,6 +123,9 @@ func (a *App) onReady() {
 
 func (a *App) onExit() {
 	a.cancel()
+	if a.player != nil {
+		a.player.Close()
+	}
 	a.wg.Wait()
 }
 
@@ -129,75 +136,28 @@ func (a *App) handleClicks() {
 		case <-a.ctx.Done():
 			return
 		case <-a.mShowHide.ClickedCh:
-			a.toggleWindow()
+			go a.toggleWindow()
 		case <-a.mPrev.ClickedCh:
-			a.callMethod("Previous")
+			go func() { _ = a.player.Call("Previous") }()
 		case <-a.mPlayPause.ClickedCh:
-			a.callMethod("PlayPause")
+			go func() { _ = a.player.Call("PlayPause") }()
 		case <-a.mNext.ClickedCh:
-			a.callMethod("Next")
+			go func() { _ = a.player.Call("Next") }()
 		case <-a.mQuit.ClickedCh:
-			// Pause playback first (instant via D-Bus)
-			a.callMethod("Pause")
-			// Close window cleanly
-			_ = exec.Command("hyprctl", "dispatch", "closewindow", "class:spotify").Run()
-			time.Sleep(500 * time.Millisecond)
-			// Force kill if still running
-			_ = exec.Command("pkill", "-9", "spotify").Run()
-			systray.Quit()
+			go a.quitSpotify()
 		}
 	}
 }
 
-func (a *App) callMethod(method string) {
-	if a.conn == nil {
-		return
-	}
-	obj := a.conn.Object(spotifyDest, spotifyObjPath)
-	call := obj.Call(playerInterface+"."+method, 0)
-	if call.Err != nil {
-		fmt.Fprintf(os.Stderr, "D-Bus call %s failed: %v\n", method, call.Err)
-	}
-}
-
-func (a *App) getMetadata() (artist, title, status string) {
-	if a.conn == nil {
-		return "", "", ""
-	}
-
-	obj := a.conn.Object(spotifyDest, spotifyObjPath)
-
-	// Get status
-	statusVar, err := obj.GetProperty(playerInterface + ".PlaybackStatus")
-	if err == nil {
-		if s, ok := statusVar.Value().(string); ok {
-			status = s
-		}
-	}
-
-	// Get metadata
-	metaVar, err := obj.GetProperty(playerInterface + ".Metadata")
-	if err != nil {
-		return "", "", status
-	}
-
-	metadata, ok := metaVar.Value().(map[string]dbus.Variant)
-	if !ok {
-		return "", "", status
-	}
-
-	if v, ok := metadata["xesam:artist"]; ok {
-		if artists, ok := v.Value().([]string); ok && len(artists) > 0 {
-			artist = strings.Join(artists, ", ")
-		}
-	}
-	if v, ok := metadata["xesam:title"]; ok {
-		if t, ok := v.Value().(string); ok {
-			title = t
-		}
-	}
-
-	return artist, title, status
+func (a *App) quitSpotify() {
+	// Pause playback first
+	_ = a.player.Call("Pause")
+	// Close window cleanly
+	_ = a.wm.CloseWindow("spotify")
+	time.Sleep(500 * time.Millisecond)
+	// Force kill if still running
+	KillSpotify()
+	systray.Quit()
 }
 
 func (a *App) updateLoop() {
@@ -219,7 +179,12 @@ func (a *App) updateLoop() {
 }
 
 func (a *App) updateTooltip() {
-	artist, title, status := a.getMetadata()
+	artist, title, status, _ := a.player.GetMetadata()
+
+	if a.mTrackInfo == nil {
+		return
+	}
+
 	if title != "" {
 		icon := "▶"
 		if status == "Paused" {
@@ -228,138 +193,89 @@ func (a *App) updateTooltip() {
 		tooltip := fmt.Sprintf("%s %s - %s", icon, title, artist)
 		systray.SetTooltip(tooltip)
 
-		// Update menu track info (if menu is initialized)
-		if a.mTrackInfo != nil {
-			trackInfo := fmt.Sprintf("%s %s", icon, title)
-			if artist != "" {
-				trackInfo = fmt.Sprintf("%s %s - %s", icon, title, artist)
-			}
-			// Truncate if too long
-			if len(trackInfo) > 40 {
-				trackInfo = trackInfo[:37] + "..."
-			}
-			a.mTrackInfo.SetTitle(trackInfo)
+		// Update menu track info
+		trackInfo := fmt.Sprintf("%s %s", icon, title)
+		if artist != "" {
+			trackInfo = fmt.Sprintf("%s %s - %s", icon, title, artist)
 		}
+		// Truncate if too long
+		if len(trackInfo) > 40 {
+			trackInfo = trackInfo[:37] + "..."
+		}
+		a.mTrackInfo.SetTitle(trackInfo)
 	} else {
 		systray.SetTooltip("Spotify")
-		if a.mTrackInfo != nil {
-			a.mTrackInfo.SetTitle("Not playing")
-		}
+		a.mTrackInfo.SetTitle("Not playing")
 	}
-}
-
-// moveWindowWithRetry moves a window to the target workspace with retry.
-// hyprctl returns "ok" on success, so we retry until we get that response.
-func (a *App) moveWindowWithRetry(addr, targetWorkspace string, shouldFocus bool) {
-	const maxRetries = 3
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		out, err := exec.Command("hyprctl", "dispatch", "movetoworkspacesilent", targetWorkspace+","+addr).Output()
-		if err == nil && strings.TrimSpace(string(out)) == "ok" {
-			if shouldFocus {
-				exec.Command("hyprctl", "dispatch", "focuswindow", addr).Run()
-			}
-			return
-		}
-		fmt.Fprintf(os.Stderr, "Move attempt %d: %v (output: %q)\n", attempt, err, string(out))
-	}
-	fmt.Fprintf(os.Stderr, "Failed to move window after %d attempts\n", maxRetries)
 }
 
 func (a *App) toggleWindow() {
-	out, err := exec.Command("hyprctl", "clients", "-j").Output()
+	clients, err := a.wm.GetClients()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "hyprctl failed: %v\n", err)
-		return
-	}
-
-	var clients []struct {
-		Address   string `json:"address"`
-		Class     string `json:"class"`
-		Workspace struct {
-			ID   int    `json:"id"`
-			Name string `json:"name"`
-		} `json:"workspace"`
-	}
-
-	if err := json.Unmarshal(out, &clients); err != nil {
-		fmt.Fprintf(os.Stderr, "JSON parse failed: %v\n", err)
+		log.Printf("Failed to get clients: %v", err)
 		return
 	}
 
 	for _, client := range clients {
 		if strings.EqualFold(client.Class, "spotify") {
 			addr := "address:" + client.Address
+
 			if strings.HasPrefix(client.Workspace.Name, "special") {
 				// Show: move from special workspace to current
-				a.moveWindowWithRetry(addr, "e+0", true)
+				if err := a.wm.MoveWindow(addr, "e+0"); err == nil {
+					_ = a.wm.FocusWindow(addr)
+				}
 			} else {
 				// Hide: move to special workspace
-				a.moveWindowWithRetry(addr, "special:spotify", false)
+				_ = a.wm.MoveWindow(addr, "special:spotify")
 			}
 			return
 		}
 	}
 
 	// Spotify not found, launch it
-	cmd := exec.Command("spotify")
-	if err := cmd.Start(); err == nil {
-		// Wait in background to properly reap the process
-		go func() { _ = cmd.Wait() }()
-
-		// Wait for Spotify window to appear and ensure it's visible
-		go a.ensureSpotifyVisible()
+	if err := a.wm.LaunchSpotify(); err == nil {
+		go a.ensureSpotifyVisible(true)
 	}
 }
 
-// ensureSpotifyVisible waits for Spotify window to appear and moves it
-// to the current workspace if it spawned in a special workspace
-func (a *App) ensureSpotifyVisible() {
-	// Poll for up to 10 seconds for Spotify to appear
-	for i := 0; i < 100; i++ {
+// ensureSpotifyVisible waits for Spotify window and moves it if needed
+func (a *App) ensureSpotifyVisible(forceMove bool) {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	timeout := time.After(10 * time.Second)
+
+	for {
 		select {
 		case <-a.ctx.Done():
 			return
-		case <-time.After(100 * time.Millisecond):
-		}
+		case <-timeout:
+			return
+		case <-ticker.C:
+			clients, err := a.wm.GetClients()
+			if err != nil {
+				continue
+			}
 
-		out, err := exec.Command("hyprctl", "clients", "-j").Output()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "DEBUG: hyprctl error: %v\n", err)
-			continue
-		}
-
-		var clients []struct {
-			Address   string `json:"address"`
-			Class     string `json:"class"`
-			Workspace struct {
-				Name string `json:"name"`
-			} `json:"workspace"`
-		}
-
-		if err := json.Unmarshal(out, &clients); err != nil {
-			fmt.Fprintf(os.Stderr, "DEBUG: JSON error: %v\n", err)
-			continue
-		}
-
-		for _, client := range clients {
-			if strings.EqualFold(client.Class, "spotify") {
-				addr := "address:" + client.Address
-				// If it spawned in special workspace, move it to current
-				if strings.HasPrefix(client.Workspace.Name, "special") {
-					fmt.Fprintf(os.Stderr, "DEBUG: Spotify spawned in special workspace, moving to current\n")
-					a.moveWindowWithRetry(addr, "e+0", true)
+			for _, client := range clients {
+				if strings.EqualFold(client.Class, "spotify") {
+					addr := "address:" + client.Address
+					// If it spawned in special workspace, move it to current
+					if forceMove && strings.HasPrefix(client.Workspace.Name, "special") {
+						if err := a.wm.MoveWindow(addr, "e+0"); err == nil {
+							_ = a.wm.FocusWindow(addr)
+						}
+					}
+					return
 				}
-				return
 			}
 		}
 	}
-	fmt.Fprintf(os.Stderr, "DEBUG: Spotify not found after 10s\n")
 }
 
 func getSpotifyIcon() []byte {
 	home, _ := os.UserHomeDir()
-	// Prefer larger icons for better quality on HiDPI displays
 	iconPaths := []string{
 		"/usr/share/icons/hicolor/256x256/apps/spotify.png",
 		"/usr/share/icons/hicolor/128x128/apps/spotify.png",
@@ -376,6 +292,6 @@ func getSpotifyIcon() []byte {
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "Warning: no Spotify icon found")
+	log.Println("Warning: no Spotify icon found")
 	return nil
 }

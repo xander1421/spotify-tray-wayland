@@ -1,6 +1,6 @@
 module spotify-tray-wayland
 
-go 1.25
+go 1.26
 
 require (
 	fyne.io/systray v1.11.0
@@ -9,4 +9,4 @@ require (
 
 require golang.org/x/sys v0.41.0 // indirect
 
-replace fyne.io/systray => github.com/xander1421/systray v1.14.0
+replace fyne.io/systray => github.com/xander1421/systray v1.15.0
