@@ -10,6 +10,9 @@ defaults:
   run:
     working-directory: ./spotify-tray-wayland
 
+env:
+  GO_VERSION: '1.26'
+
 jobs:
   lint:
     name: Lint
@@ -20,23 +23,50 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-          cache-dependency-path: spotify-tray-wayland/go.sum
+          go-version: ${{ env.GO_VERSION }}
+          cache: false  # We'll handle caching ourselves
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('spotify-tray-wayland/go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Cache Go tools
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin
+          key: go-tools-${{ runner.os }}-staticcheck-nilaway-v1
+          restore-keys: |
+            go-tools-${{ runner.os }}-
+
+      - name: Download dependencies
+        run: go mod download
 
       - name: Run go vet
         run: go vet ./...
 
       - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+        run: |
+          if [ ! -f ~/go/bin/staticcheck ]; then
+            go install honnef.co/go/tools/cmd/staticcheck@latest
+          fi
 
       - name: Run staticcheck
-        run: staticcheck ./...
+        run: ~/go/bin/staticcheck ./...
 
       - name: Install nilaway
-        run: go install go.uber.org/nilaway/cmd/nilaway@latest
+        run: |
+          if [ ! -f ~/go/bin/nilaway ]; then
+            go install go.uber.org/nilaway/cmd/nilaway@latest
+          fi
 
       - name: Run nilaway
-        run: nilaway ./...
+        run: ~/go/bin/nilaway ./...
 
   security:
     name: Security
@@ -47,14 +77,36 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-          cache-dependency-path: spotify-tray-wayland/go.sum
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('spotify-tray-wayland/go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Cache govulncheck
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/govulncheck
+          key: go-tools-${{ runner.os }}-govulncheck-v1
+
+      - name: Download dependencies
+        run: go mod download
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: |
+          if [ ! -f ~/go/bin/govulncheck ]; then
+            go install golang.org/x/vuln/cmd/govulncheck@latest
+          fi
 
       - name: Run govulncheck
-        run: govulncheck ./...
+        run: ~/go/bin/govulncheck ./...
 
   test:
     name: Test
@@ -65,8 +117,21 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-          cache-dependency-path: spotify-tray-wayland/go.sum
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('spotify-tray-wayland/go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Download dependencies
+        run: go mod download
 
       - name: Run tests with race detection
         run: go test -race -coverprofile=coverage.out ./...
@@ -106,8 +171,21 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-          cache-dependency-path: spotify-tray-wayland/go.sum
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('spotify-tray-wayland/go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Download dependencies
+        run: go mod download
 
       - name: Build
         run: go build -v -o spotify-tray-wayland .
