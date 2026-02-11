@@ -1,0 +1,48 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'spotify-tray-wayland/**'
+      - 'setup.sh'
+      - 'uninstall.sh'
+
+jobs:
+  auto-release:
+    name: Create Release Tag
+    runs-on: ubuntu-latest
+    # Skip if commit is from bot (AUR checksum updates)
+    if: "!contains(github.event.head_commit.message, 'Update AUR checksums')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get latest tag and bump version
+        id: version
+        run: |
+          # Get latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+
+          # Parse version (remove 'v' prefix)
+          VERSION=${LATEST_TAG#v}
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+
+          # Bump patch version
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="v${MAJOR}.${MINOR}.${NEW_PATCH}"
+
+          echo "New version: $NEW_VERSION"
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.NEW_VERSION }}
+          git push origin ${{ steps.version.outputs.NEW_VERSION }}
