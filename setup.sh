@@ -1,8 +1,33 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 # Spotify Tray for Hyprland - Setup Script
 # Installs tray icon with scroll/middle-click support and smart-close keybind
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Error handler
+error_exit() {
+    echo -e "${RED}ERROR: $1${NC}" >&2
+    exit 1
+}
+
+# Warning (non-fatal)
+warn() {
+    echo -e "${YELLOW}WARNING: $1${NC}" >&2
+}
+
+# Success message
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+# Trap errors and show where they occurred
+trap 'error_exit "Script failed at line $LINENO. Command: $BASH_COMMAND"' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.local/bin"
@@ -13,12 +38,24 @@ HYPR_DIR="$CONFIG_DIR/hypr"
 
 echo "=== Spotify Tray Setup ==="
 
+# Check dependencies
+echo "[0/7] Checking dependencies..."
+command -v go >/dev/null 2>&1 || error_exit "Go is not installed. Install with: sudo pacman -S go"
+command -v hyprctl >/dev/null 2>&1 || error_exit "Hyprland is not installed or not in PATH"
+command -v spotify >/dev/null 2>&1 || warn "Spotify not found. Install spotify-launcher or spotify from AUR"
+
+# Check Hyprland config exists
+[[ -d "$HYPR_DIR" ]] || error_exit "Hyprland config directory not found at $HYPR_DIR"
+[[ -f "$HYPR_DIR/hyprland.conf" ]] || error_exit "hyprland.conf not found at $HYPR_DIR/hyprland.conf"
+
+echo "      Dependencies OK"
+
 # Detect user's killactive keybind
 detect_killactive_keybind() {
     local killactive_line modifier key
 
     # Search all hyprland configs for killactive binding
-    killactive_line=$(grep -rh "killactive" "$HYPR_DIR" 2>/dev/null | grep -E "^bind" | head -1)
+    killactive_line=$(grep -rh "killactive" "$HYPR_DIR" 2>/dev/null | grep -E "^bind" | head -1 || true)
 
     if [[ -z "$killactive_line" ]]; then
         # Default fallback
@@ -29,7 +66,8 @@ detect_killactive_keybind() {
     # Extract modifier and key from bind line
     # Format: bind[d] = MODIFIER, KEY, [description,] killactive
     # Remove everything after the = and parse
-    local bind_part=$(echo "$killactive_line" | sed 's/.*=\s*//' | tr -d ' ')
+    local bind_part
+    bind_part=$(echo "$killactive_line" | sed 's/.*=\s*//' | tr -d ' ')
 
     # Get first two comma-separated values (modifier, key)
     modifier=$(echo "$bind_part" | cut -d',' -f1)
@@ -38,7 +76,8 @@ detect_killactive_keybind() {
     # Resolve $mainMod variable if present
     if [[ "$modifier" == *'$mainMod'* ]] || [[ "$modifier" == *'${mainMod}'* ]]; then
         # Find mainMod definition
-        local mainmod_def=$(grep -rh '^\$mainMod\s*=' "$HYPR_DIR" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d ' ')
+        local mainmod_def
+        mainmod_def=$(grep -rh '^\$mainMod\s*=' "$HYPR_DIR" 2>/dev/null | head -1 | sed 's/.*=\s*//' | tr -d ' ' || true)
         mainmod_def=${mainmod_def:-SUPER}
         modifier=$(echo "$modifier" | sed "s/\\\$mainMod/$mainmod_def/g" | sed "s/\${mainMod}/$mainmod_def/g")
     fi
@@ -46,21 +85,41 @@ detect_killactive_keybind() {
     echo "$modifier $key"
 }
 
-echo "[0/6] Detecting keybinds..."
+echo "[1/7] Detecting keybinds..."
 read -r CLOSE_MOD CLOSE_KEY <<< "$(detect_killactive_keybind)"
 echo "      Found killactive keybind: $CLOSE_MOD + $CLOSE_KEY"
 
-# 1. Build the tray application
-echo "[1/6] Building spotify-tray..."
+# 2. Build the tray application
+echo "[2/7] Building spotify-tray..."
 cd "$SCRIPT_DIR/spotify-tray-wayland"
-go build -o spotify-tray-wayland .
-echo "      Built successfully"
 
-# 2. Install binaries to ~/.local/bin
-echo "[2/6] Installing to $INSTALL_DIR..."
-mkdir -p "$INSTALL_DIR"
-cp spotify-tray-wayland "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/spotify-tray-wayland"
+# Check source files exist
+for file in main.go dbus.go hyprland.go interfaces.go; do
+    [[ -f "$file" ]] || error_exit "Source file $file not found in $SCRIPT_DIR/spotify-tray-wayland"
+done
+
+# Build with explicit file list (avoid experimental files)
+if ! go build -o spotify-tray-wayland main.go dbus.go hyprland.go interfaces.go 2>&1; then
+    error_exit "Go build failed. Check the output above for errors."
+fi
+
+# Verify binary was created
+[[ -f "spotify-tray-wayland" ]] || error_exit "Binary was not created after build"
+[[ -x "spotify-tray-wayland" ]] || chmod +x spotify-tray-wayland
+
+# Verify binary has correct workspace (sanity check)
+if strings spotify-tray-wayland | grep -q "special:spotify"; then
+    warn "Binary contains old 'special:spotify' - expected 'special:minimized'"
+fi
+
+success "      Built successfully"
+
+# 3. Install binaries to ~/.local/bin
+echo "[3/7] Installing to $INSTALL_DIR..."
+mkdir -p "$INSTALL_DIR" || error_exit "Failed to create $INSTALL_DIR"
+
+cp spotify-tray-wayland "$INSTALL_DIR/" || error_exit "Failed to copy binary to $INSTALL_DIR"
+chmod +x "$INSTALL_DIR/spotify-tray-wayland" || error_exit "Failed to make binary executable"
 
 # Create launcher script
 cat > "$INSTALL_DIR/spotify-launcher.sh" << 'EOF'
@@ -75,12 +134,14 @@ fi
 # Start Spotify
 exec spotify "$@"
 EOF
-chmod +x "$INSTALL_DIR/spotify-launcher.sh"
-echo "      Installed binaries"
+chmod +x "$INSTALL_DIR/spotify-launcher.sh" || error_exit "Failed to make launcher script executable"
 
-# 3. Create desktop entry (overrides system Spotify)
-echo "[3/6] Creating desktop entry..."
-mkdir -p "$APPS_DIR"
+success "      Installed binaries"
+
+# 4. Create desktop entry (overrides system Spotify)
+echo "[4/7] Creating desktop entry..."
+mkdir -p "$APPS_DIR" || error_exit "Failed to create $APPS_DIR"
+
 cat > "$APPS_DIR/spotify.desktop" << EOF
 [Desktop Entry]
 Type=Application
@@ -94,12 +155,18 @@ MimeType=x-scheme-handler/spotify;
 Categories=Audio;Music;Player;AudioVideo;
 StartupWMClass=spotify
 EOF
-update-desktop-database "$APPS_DIR" 2>/dev/null || true
-echo "      Created desktop entry"
 
-# 4. Install smart-close script (Super+Q minimizes Spotify, kills other windows)
-echo "[4/6] Installing smart-close script..."
-mkdir -p "$HYPR_SCRIPTS"
+# Update desktop database (non-critical)
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$APPS_DIR" 2>/dev/null || warn "Failed to update desktop database (non-critical)"
+fi
+
+success "      Created desktop entry"
+
+# 5. Install smart-close script (Super+Q minimizes Spotify, kills other windows)
+echo "[5/7] Installing smart-close script..."
+mkdir -p "$HYPR_SCRIPTS" || error_exit "Failed to create $HYPR_SCRIPTS"
+
 cat > "$HYPR_SCRIPTS/smart-close.sh" << 'EOF'
 #!/bin/bash
 # Smart close: minimize Spotify to tray, kill other windows
@@ -108,17 +175,19 @@ cat > "$HYPR_SCRIPTS/smart-close.sh" << 'EOF'
 class=$(hyprctl activewindow | grep "class:" | cut -d' ' -f2)
 
 if [[ "${class,,}" == "spotify" ]]; then
-    hyprctl dispatch movetoworkspacesilent special:minimized
+    hyprctl dispatch movetoworkspacesilent special:spotify
 else
     hyprctl dispatch killactive
 fi
 EOF
-chmod +x "$HYPR_SCRIPTS/smart-close.sh"
-echo "      Installed smart-close script"
+chmod +x "$HYPR_SCRIPTS/smart-close.sh" || error_exit "Failed to make smart-close.sh executable"
 
-# 5. Create Hyprland config snippet
-echo "[5/6] Configuring Hyprland keybinds..."
-mkdir -p "$CONFIG_DIR/hypr/conf.d"
+success "      Installed smart-close script"
+
+# 6. Create Hyprland config snippet
+echo "[6/7] Configuring Hyprland keybinds..."
+mkdir -p "$CONFIG_DIR/hypr/conf.d" || error_exit "Failed to create conf.d directory"
+
 cat > "$CONFIG_DIR/hypr/conf.d/spotify.conf" << EOF
 # Spotify Tray Configuration
 # Auto-generated by spotify-tray setup script
@@ -128,11 +197,8 @@ cat > "$CONFIG_DIR/hypr/conf.d/spotify.conf" << EOF
 unbind = $CLOSE_MOD, $CLOSE_KEY
 bind = $CLOSE_MOD, $CLOSE_KEY, exec, ~/.config/hypr/UserScripts/smart-close.sh
 
-# Super+M: Minimize focused window to special workspace
-bind = SUPER, M, movetoworkspacesilent, special:minimized
-
-# Super+\` (grave): Show minimized windows
-bind = SUPER, grave, togglespecialworkspace, minimized
+# Super+\` (grave): Toggle Spotify workspace
+bind = SUPER, grave, togglespecialworkspace, spotify
 EOF
 
 # Check if conf.d is sourced in main config
@@ -142,18 +208,26 @@ if ! grep -q "source.*conf.d" "$CONFIG_DIR/hypr/hyprland.conf" 2>/dev/null; then
     echo "source = ~/.config/hypr/conf.d/*.conf" >> "$CONFIG_DIR/hypr/hyprland.conf"
     echo "      Added conf.d source to hyprland.conf"
 fi
-echo "      Created Hyprland config"
 
-# 6. Cleanup old autostart (tray now starts with Spotify)
-echo "[6/6] Cleaning up..."
-rm -f "$CONFIG_DIR/autostart/spotify-tray.desktop" 2>/dev/null
-echo "      Done"
+success "      Created Hyprland config"
+
+# 7. Cleanup and reload
+echo "[7/7] Finalizing..."
+
+# Cleanup old autostart (tray now starts with Spotify)
+rm -f "$CONFIG_DIR/autostart/spotify-tray.desktop" 2>/dev/null || true
 
 # Reload Hyprland config
-hyprctl reload 2>/dev/null || true
+if ! hyprctl reload 2>&1; then
+    warn "Failed to reload Hyprland config. You may need to reload manually or restart Hyprland."
+else
+    echo "      Hyprland config reloaded"
+fi
+
+success "      Done"
 
 echo ""
-echo "=== Setup Complete ==="
+success "=== Setup Complete ==="
 echo ""
 echo "Features:"
 echo "  - Tray icon starts WITH Spotify (not at login)"
@@ -164,7 +238,6 @@ echo "  - $CLOSE_MOD+$CLOSE_KEY: Minimizes Spotify to tray (kills other windows)
 echo ""
 echo "Keybinds:"
 echo "  - $CLOSE_MOD+$CLOSE_KEY: Smart close (minimize Spotify / kill others)"
-echo "  - Super+M: Minimize any window"
-echo "  - Super+\`: Show minimized windows"
+echo "  - Super+\`: Toggle Spotify workspace (show/hide)"
 echo ""
 echo "Launch Spotify from your app menu to test!"

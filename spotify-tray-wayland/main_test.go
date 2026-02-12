@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"runtime"
 	"sync"
 	"testing"
@@ -274,6 +278,147 @@ func TestParseHyprctlClients_SingleClient(t *testing.T) {
 	}
 }
 
+// --- FAST PARSER TESTS ---
+
+func TestParseHyprctlClientsFast(t *testing.T) {
+	input := `Window 560770936780 -> alex@myhostname:~:
+	mapped: 1
+	hidden: 0
+	at: 2763,405
+	size: 2662,1404
+	workspace: -98 (special:scratchpad)
+	floating: 1
+	class: kitty
+	title: alex@myhostname:~
+
+Window 560770e3b350 -> Spotify:
+	mapped: 1
+	hidden: 0
+	workspace: 1 (1)
+	class: Spotify
+	title: Spotify Premium
+`
+
+	clients := parseHyprctlClientsFast([]byte(input))
+
+	if len(clients) != 2 {
+		t.Fatalf("Expected 2 clients, got %d", len(clients))
+	}
+
+	// First client
+	if clients[0].Class != "kitty" {
+		t.Errorf("Expected class 'kitty', got '%s'", clients[0].Class)
+	}
+	if clients[0].Address != "0x560770936780" {
+		t.Errorf("Expected address '0x560770936780', got '%s'", clients[0].Address)
+	}
+	if clients[0].Workspace.Name != "special:scratchpad" {
+		t.Errorf("Expected workspace 'special:scratchpad', got '%s'", clients[0].Workspace.Name)
+	}
+	if clients[0].Workspace.ID != -98 {
+		t.Errorf("Expected workspace ID -98, got %d", clients[0].Workspace.ID)
+	}
+
+	// Second client (Spotify)
+	if clients[1].Class != "Spotify" {
+		t.Errorf("Expected class 'Spotify', got '%s'", clients[1].Class)
+	}
+	if clients[1].Workspace.Name != "1" {
+		t.Errorf("Expected workspace '1', got '%s'", clients[1].Workspace.Name)
+	}
+}
+
+func TestParseHyprctlClientsFast_Empty(t *testing.T) {
+	clients := parseHyprctlClientsFast([]byte(""))
+	if len(clients) != 0 {
+		t.Errorf("Expected 0 clients from empty input, got %d", len(clients))
+	}
+}
+
+func TestAllVersionsMatch(t *testing.T) {
+	type parser struct {
+		name string
+		fn   func([]byte) []HyprlandClient
+	}
+
+	parsers := []parser{
+		{"V1_Original", parseV1Original},
+		{"V2_Bytes", parseV2Bytes},
+		{"V3_Direct", parseV3Direct},
+		{"V4_Unsafe", parseV4Unsafe},
+		{"V5_Pooled", parseV5Pooled},
+		{"V6_Unrolled", parseV6Unrolled},
+		{"V7_Minimal", parseV7Minimal},
+	}
+
+	for _, n := range []int{1, 3, 10, 50} {
+		input := generateHyprctlOutput(n)
+		reference := parseV1Original(input)
+
+		for _, p := range parsers[1:] { // Skip V1 (it's the reference)
+			result := p.fn(input)
+
+			if len(result) != len(reference) {
+				t.Errorf("n=%d, %s: length mismatch: got %d, want %d",
+					n, p.name, len(result), len(reference))
+				continue
+			}
+
+			for i := range reference {
+				if result[i].Class != reference[i].Class {
+					t.Errorf("n=%d, %s, i=%d: class mismatch: got %q, want %q",
+						n, p.name, i, result[i].Class, reference[i].Class)
+				}
+				if result[i].Address != reference[i].Address {
+					t.Errorf("n=%d, %s, i=%d: address mismatch: got %q, want %q",
+						n, p.name, i, result[i].Address, reference[i].Address)
+				}
+				if result[i].Workspace.Name != reference[i].Workspace.Name {
+					t.Errorf("n=%d, %s, i=%d: workspace name mismatch: got %q, want %q",
+						n, p.name, i, result[i].Workspace.Name, reference[i].Workspace.Name)
+				}
+				if result[i].Workspace.ID != reference[i].Workspace.ID {
+					t.Errorf("n=%d, %s, i=%d: workspace ID mismatch: got %d, want %d",
+						n, p.name, i, result[i].Workspace.ID, reference[i].Workspace.ID)
+				}
+			}
+		}
+	}
+}
+
+func TestParseHyprctlClientsFast_MatchesOriginal(t *testing.T) {
+	// Test with various sizes
+	for _, n := range []int{1, 3, 10, 50} {
+		input := generateHyprctlOutput(n)
+
+		original := parseHyprctlClients(input)
+		fast := parseHyprctlClientsFast(input)
+
+		if len(original) != len(fast) {
+			t.Fatalf("n=%d: length mismatch: original=%d, fast=%d", n, len(original), len(fast))
+		}
+
+		for i := range original {
+			if original[i].Class != fast[i].Class {
+				t.Errorf("n=%d, i=%d: class mismatch: original=%q, fast=%q",
+					n, i, original[i].Class, fast[i].Class)
+			}
+			if original[i].Address != fast[i].Address {
+				t.Errorf("n=%d, i=%d: address mismatch: original=%q, fast=%q",
+					n, i, original[i].Address, fast[i].Address)
+			}
+			if original[i].Workspace.Name != fast[i].Workspace.Name {
+				t.Errorf("n=%d, i=%d: workspace name mismatch: original=%q, fast=%q",
+					n, i, original[i].Workspace.Name, fast[i].Workspace.Name)
+			}
+			if original[i].Workspace.ID != fast[i].Workspace.ID {
+				t.Errorf("n=%d, i=%d: workspace ID mismatch: original=%d, fast=%d",
+					n, i, original[i].Workspace.ID, fast[i].Workspace.ID)
+			}
+		}
+	}
+}
+
 // --- LIFECYCLE TESTS ---
 
 func TestUpdateLoopExits(t *testing.T) {
@@ -414,24 +559,480 @@ func TestGetSpotifyIcon(t *testing.T) {
 
 // --- BENCHMARKS ---
 
-func BenchmarkParseHyprctlClients(b *testing.B) {
-	input := []byte(`Window 560770936780 -> Window 1:
-	class: class1
-	workspace: 1 (workspace1)
+// generateHyprctlOutput creates realistic hyprctl clients output
+func generateHyprctlOutput(numClients int) []byte {
+	var buf bytes.Buffer
+	classes := []string{"kitty", "firefox", "Spotify", "code", "slack", "discord", "chromium", "nautilus"}
+	workspaces := []string{"1", "2", "3", "special:scratchpad", "special:spotify"}
 
-Window 560770936781 -> Window 2:
-	class: class2
-	workspace: 2 (workspace2)
+	for i := 0; i < numClients; i++ {
+		addr := 0x560770936780 + i
+		class := classes[i%len(classes)]
+		ws := workspaces[i%len(workspaces)]
+		wsID := (i % 5) + 1
+		if len(ws) >= 7 && ws[:7] == "special" {
+			wsID = -98 - (i % 3)
+		}
 
-Window 560770936782 -> Window 3:
-	class: Spotify
-	workspace: -99 (special:spotify)
-`)
+		buf.WriteString(fmt.Sprintf("Window %x -> %s Window %d:\n", addr, class, i))
+		buf.WriteString("\tmapped: 1\n")
+		buf.WriteString("\thidden: 0\n")
+		buf.WriteString(fmt.Sprintf("\tat: %d,%d\n", 100+i*10, 100+i*5))
+		buf.WriteString(fmt.Sprintf("\tsize: %d,%d\n", 800+i, 600+i))
+		buf.WriteString(fmt.Sprintf("\tworkspace: %d (%s)\n", wsID, ws))
+		buf.WriteString("\tfloating: 0\n")
+		buf.WriteString("\tpseudo: 0\n")
+		buf.WriteString("\tpinned: 0\n")
+		buf.WriteString("\tfullscreen: 0\n")
+		buf.WriteString("\tfullscreenMode: 0\n")
+		buf.WriteString("\tfakeFullscreen: 0\n")
+		buf.WriteString(fmt.Sprintf("\tclass: %s\n", class))
+		buf.WriteString(fmt.Sprintf("\ttitle: %s - Instance %d\n", class, i))
+		buf.WriteString(fmt.Sprintf("\tinitialClass: %s\n", class))
+		buf.WriteString(fmt.Sprintf("\tinitialTitle: %s\n", class))
+		buf.WriteString(fmt.Sprintf("\tpid: %d\n", 1000+i))
+		buf.WriteString("\txwayland: 0\n")
+		buf.WriteString("\n")
+	}
+	return buf.Bytes()
+}
 
+func BenchmarkParseHyprctlClients_1(b *testing.B) {
+	input := generateHyprctlOutput(1)
+	b.SetBytes(int64(len(input)))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = parseHyprctlClients(input)
 	}
+}
+
+func BenchmarkParseHyprctlClients_3(b *testing.B) {
+	input := generateHyprctlOutput(3)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClients(input)
+	}
+}
+
+func BenchmarkParseHyprctlClients_10(b *testing.B) {
+	input := generateHyprctlOutput(10)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClients(input)
+	}
+}
+
+func BenchmarkParseHyprctlClients_50(b *testing.B) {
+	input := generateHyprctlOutput(50)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClients(input)
+	}
+}
+
+func BenchmarkParseHyprctlClients_100(b *testing.B) {
+	input := generateHyprctlOutput(100)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClients(input)
+	}
+}
+
+// BenchmarkParseHyprctlClients_Allocs measures memory allocations
+func BenchmarkParseHyprctlClients_Allocs(b *testing.B) {
+	sizes := []int{1, 10, 50, 100}
+	for _, n := range sizes {
+		input := generateHyprctlOutput(n)
+		b.Run(fmt.Sprintf("clients_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = parseHyprctlClients(input)
+			}
+		})
+	}
+}
+
+// === FAST PARSER BENCHMARKS ===
+
+func BenchmarkParseHyprctlClientsFast_1(b *testing.B) {
+	input := generateHyprctlOutput(1)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClientsFast(input)
+	}
+}
+
+func BenchmarkParseHyprctlClientsFast_3(b *testing.B) {
+	input := generateHyprctlOutput(3)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClientsFast(input)
+	}
+}
+
+func BenchmarkParseHyprctlClientsFast_10(b *testing.B) {
+	input := generateHyprctlOutput(10)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClientsFast(input)
+	}
+}
+
+func BenchmarkParseHyprctlClientsFast_50(b *testing.B) {
+	input := generateHyprctlOutput(50)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClientsFast(input)
+	}
+}
+
+func BenchmarkParseHyprctlClientsFast_100(b *testing.B) {
+	input := generateHyprctlOutput(100)
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseHyprctlClientsFast(input)
+	}
+}
+
+func BenchmarkParseHyprctlClientsFast_Allocs(b *testing.B) {
+	sizes := []int{1, 10, 50, 100}
+	for _, n := range sizes {
+		input := generateHyprctlOutput(n)
+		b.Run(fmt.Sprintf("clients_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = parseHyprctlClientsFast(input)
+			}
+		})
+	}
+}
+
+// === ALL VERSIONS COMPARISON ===
+
+func BenchmarkAllVersions(b *testing.B) {
+	sizes := []int{3, 10, 50, 100}
+
+	type parser struct {
+		name string
+		fn   func([]byte) []HyprlandClient
+	}
+
+	parsers := []parser{
+		{"V1_Original", parseV1Original},
+		{"V2_Bytes", parseV2Bytes},
+		{"V3_Direct", parseV3Direct},
+		{"V4_Unsafe", parseV4Unsafe},
+		{"V5_Pooled", parseV5Pooled},
+		{"V6_Unrolled", parseV6Unrolled},
+		{"V7_Minimal", parseV7Minimal},
+	}
+
+	for _, n := range sizes {
+		input := generateHyprctlOutput(n)
+
+		for _, p := range parsers {
+			b.Run(fmt.Sprintf("%s/clients_%d", p.name, n), func(b *testing.B) {
+				b.ReportAllocs()
+				b.SetBytes(int64(len(input)))
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					_ = p.fn(input)
+				}
+			})
+		}
+	}
+}
+
+// BenchmarkVersionsDetailed provides per-operation metrics
+func BenchmarkVersionsDetailed(b *testing.B) {
+	input := generateHyprctlOutput(10) // Typical desktop: 10 windows
+
+	b.Run("V1_Original_bufio+strings", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(input)))
+		for i := 0; i < b.N; i++ {
+			_ = parseV1Original(input)
+		}
+	})
+
+	b.Run("V2_Bytes_bufio+bytes", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(input)))
+		for i := 0; i < b.N; i++ {
+			_ = parseV2Bytes(input)
+		}
+	})
+
+	b.Run("V3_Direct_no_bufio", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(input)))
+		for i := 0; i < b.N; i++ {
+			_ = parseV3Direct(input)
+		}
+	})
+
+	b.Run("V4_Unsafe_zero_copy", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(input)))
+		for i := 0; i < b.N; i++ {
+			_ = parseV4Unsafe(input)
+		}
+	})
+
+	b.Run("V5_Pooled_sync.Pool", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(input)))
+		for i := 0; i < b.N; i++ {
+			_ = parseV5Pooled(input)
+		}
+	})
+
+	b.Run("V6_Unrolled_4x_loop", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(input)))
+		for i := 0; i < b.N; i++ {
+			_ = parseV6Unrolled(input)
+		}
+	})
+
+	b.Run("V7_Minimal_skip_fields", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(input)))
+		for i := 0; i < b.N; i++ {
+			_ = parseV7Minimal(input)
+		}
+	})
+}
+
+// === ADVANCED VERSIONS (V8-V11) ===
+
+func BenchmarkAdvancedVersions(b *testing.B) {
+	sizes := []int{3, 10, 50, 100}
+
+	for _, n := range sizes {
+		input := generateHyprctlOutput(n)
+
+		b.Run(fmt.Sprintf("V5_Pooled/clients_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+			for i := 0; i < b.N; i++ {
+				_ = parseV5Pooled(input)
+			}
+		})
+
+		b.Run(fmt.Sprintf("V7_Minimal/clients_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+			for i := 0; i < b.N; i++ {
+				_ = parseV7Minimal(input)
+			}
+		})
+
+		b.Run(fmt.Sprintf("V8_Stack/clients_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+			for i := 0; i < b.N; i++ {
+				_ = parseV8Stack(input)
+			}
+		})
+
+		b.Run(fmt.Sprintf("V9_Iterator/clients_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+			for i := 0; i < b.N; i++ {
+				// Consume all clients to measure full parse
+				for client := range parseV9Iterator(input) {
+					_ = client
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("V10_SWAR/clients_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+			for i := 0; i < b.N; i++ {
+				_ = parseV10SWAR(input)
+			}
+		})
+	}
+}
+
+// BenchmarkFindSpotify measures the real use case: finding Spotify window
+func BenchmarkFindSpotify(b *testing.B) {
+	// Generate data where Spotify is at different positions
+	positions := []struct {
+		name     string
+		generate func() []byte
+	}{
+		{"first", func() []byte {
+			// Spotify is first window
+			return generateHyprctlOutputWithSpotifyAt(10, 0)
+		}},
+		{"middle", func() []byte {
+			// Spotify is 5th of 10 windows
+			return generateHyprctlOutputWithSpotifyAt(10, 4)
+		}},
+		{"last", func() []byte {
+			// Spotify is last of 10 windows
+			return generateHyprctlOutputWithSpotifyAt(10, 9)
+		}},
+		{"not_found", func() []byte {
+			// Spotify not present
+			return generateHyprctlOutput(10)
+		}},
+	}
+
+	for _, pos := range positions {
+		input := pos.generate()
+
+		b.Run(fmt.Sprintf("V5_Pooled_%s", pos.name), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				clients := parseV5Pooled(input)
+				for _, c := range clients {
+					if c.Class == "Spotify" {
+						break
+					}
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("V9_Iterator_%s", pos.name), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_, _ = FindSpotify(input)
+			}
+		})
+
+		b.Run(fmt.Sprintf("V11_Direct_%s", pos.name), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_, _ = parseV11SpotifyOnly(input)
+			}
+		})
+	}
+}
+
+// generateHyprctlOutputWithSpotifyAt creates output with Spotify at specific position
+// Use spotifyPos = -1 to generate output without Spotify
+func generateHyprctlOutputWithSpotifyAt(numClients, spotifyPos int) []byte {
+	var buf bytes.Buffer
+	classes := []string{"kitty", "firefox", "code", "slack", "discord", "chromium", "nautilus", "vlc"}
+	workspaces := []string{"1", "2", "3", "special:scratchpad"}
+
+	for i := 0; i < numClients; i++ {
+		addr := 0x560770936780 + i
+		class := classes[i%len(classes)]
+		if spotifyPos >= 0 && i == spotifyPos {
+			class = "Spotify"
+		}
+		ws := workspaces[i%len(workspaces)]
+		wsID := (i % 4) + 1
+		if len(ws) >= 7 && ws[:7] == "special" {
+			wsID = -98
+		}
+
+		buf.WriteString(fmt.Sprintf("Window %x -> %s Window %d:\n", addr, class, i))
+		buf.WriteString("\tmapped: 1\n")
+		buf.WriteString("\thidden: 0\n")
+		buf.WriteString(fmt.Sprintf("\tat: %d,%d\n", 100+i*10, 100+i*5))
+		buf.WriteString(fmt.Sprintf("\tsize: %d,%d\n", 800+i, 600+i))
+		buf.WriteString(fmt.Sprintf("\tworkspace: %d (%s)\n", wsID, ws))
+		buf.WriteString("\tfloating: 0\n")
+		buf.WriteString(fmt.Sprintf("\tclass: %s\n", class))
+		buf.WriteString(fmt.Sprintf("\ttitle: %s - Instance %d\n", class, i))
+		buf.WriteString(fmt.Sprintf("\tpid: %d\n", 1000+i))
+		buf.WriteString("\n")
+	}
+	return buf.Bytes()
+}
+
+// === V12: Socket vs Exec Benchmarks (requires running Hyprland) ===
+
+func BenchmarkExecVsSocket(b *testing.B) {
+	// Skip if not running under Hyprland
+	if os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") == "" {
+		b.Skip("Not running under Hyprland")
+	}
+
+	b.Run("Exec_hyprctl", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			out, err := exec.Command("hyprctl", "clients").Output()
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = parseV7Minimal(out)
+		}
+	})
+
+	// V12: Socket-based HyprlandManager
+	wm := NewHyprlandManager()
+
+	b.Run("Socket_direct", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, err := wm.GetClients()
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Socket_FindSpotify", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _ = wm.FindSpotify()
+		}
+	})
+}
+
+// BenchmarkRealWorldToggle measures the actual toggle operation
+func BenchmarkRealWorldToggle(b *testing.B) {
+	if os.Getenv("HYPRLAND_INSTANCE_SIGNATURE") == "" {
+		b.Skip("Not running under Hyprland")
+	}
+
+	// Old way: exec.Command
+	b.Run("Exec_GetClients", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			out, _ := exec.Command("hyprctl", "clients").Output()
+			clients := parseV7Minimal(out)
+			for _, c := range clients {
+				if c.Class == "Spotify" || c.Class == "spotify" {
+					_ = c.Address
+					break
+				}
+			}
+		}
+	})
+
+	// New way: V12 socket + V11 search
+	wm := NewHyprlandManager()
+
+	b.Run("Socket_FindSpotify", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			client, found := wm.FindSpotify()
+			if found {
+				_ = client.Address
+			}
+		}
+	})
 }
 
 func BenchmarkToggleWindow(b *testing.B) {

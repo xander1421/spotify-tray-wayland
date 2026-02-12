@@ -72,12 +72,7 @@ func main() {
 }
 
 func (a *App) onReady() {
-	icon := getSpotifyIcon()
-	if icon != nil {
-		systray.SetIcon(icon)
-	} else {
-		systray.SetTitle("Spo")
-	}
+	systray.SetIcon(getSpotifyIcon())
 	systray.SetTitle("Spotify")
 	systray.SetTooltip("Spotify - Click for controls")
 
@@ -117,7 +112,7 @@ func (a *App) onReady() {
 	})
 
 	// Ensure Spotify is visible if already running but hidden
-	go a.ensureSpotifyVisible(false)
+	go a.ensureSpotifyVisible(true)
 
 	// Start background loops
 	a.wg.Add(2)
