@@ -279,18 +279,13 @@ jobs:
 
       - name: Commit and push PKGBUILD updates
         working-directory: .
-        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
-          git pull origin main
           git add aur/spotify-tray-wayland-bin/PKGBUILD aur/spotify-tray-wayland-bin/.SRCINFO
           git add aur/spotify-tray-wayland-git/PKGBUILD aur/spotify-tray-wayland-git/.SRCINFO
-          git diff --cached --quiet && echo "No changes to commit" && exit 0
-          git commit -m "Update AUR checksums for ${GITHUB_REF#refs/tags/}"
-          git push origin main
+          git commit -m "Update AUR checksums for ${GITHUB_REF#refs/tags/}" || exit 0
+          git push origin HEAD:main
 
       - name: Publish to AUR
         working-directory: .
