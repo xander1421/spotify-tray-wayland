@@ -100,10 +100,13 @@ func parseV2Bytes(data []byte) []HyprlandClient {
 		}
 
 		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
 
-		if bytes.HasPrefix(line, []byte("class: ")) {
+		if len(line) >= 7 && bytes.HasPrefix(line, []byte("class: ")) {
 			current.Class = string(line[7:])
-		} else if bytes.HasPrefix(line, []byte("workspace: ")) {
+		} else if len(line) >= 11 && bytes.HasPrefix(line, []byte("workspace: ")) {
 			ws := line[11:]
 			if idx := bytes.IndexByte(ws, '('); idx > 0 {
 				current.Workspace.ID = atoiBytes(ws[:idx-1])
@@ -330,7 +333,10 @@ func parseV5Pooled(data []byte) []HyprlandClient {
 		return nil
 	}
 
-	clientsPtr := v5Pool.Get().(*[]HyprlandClient)
+	clientsPtr, ok := v5Pool.Get().(*[]HyprlandClient)
+	if !ok || clientsPtr == nil {
+		return nil
+	}
 	clients := (*clientsPtr)[:0]
 
 	idx := -1
