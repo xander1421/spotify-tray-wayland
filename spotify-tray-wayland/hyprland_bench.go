@@ -334,8 +334,9 @@ func parseV5Pooled(data []byte) []HyprlandClient {
 	}
 
 	clientsPtr, ok := v5Pool.Get().(*[]HyprlandClient)
-	if !ok || clientsPtr == nil {
-		return nil
+	if !ok || clientsPtr == nil || *clientsPtr == nil {
+		s := make([]HyprlandClient, 0, 16)
+		clientsPtr = &s
 	}
 	clients := (*clientsPtr)[:0]
 
