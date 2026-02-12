@@ -30,7 +30,7 @@ jobs:
           COMMIT_SHA="${{ github.event.workflow_run.head_sha }}"
 
           # Check if relevant files changed in this commit
-          CHANGED=$(git diff-tree --no-commit-id --name-only -r $COMMIT_SHA | grep -E '^spotify-tray-wayland/|^setup\.sh$|^uninstall\.sh$' || true)
+          CHANGED=$(git diff-tree --no-commit-id --name-only -r $COMMIT_SHA | grep -E '^spotify-tray-wayland/|^setup\.sh$|^uninstall\.sh$|^README\.md$' || true)
 
           if [ -n "$CHANGED" ]; then
             echo "Code files changed, will create release"
