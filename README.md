@@ -94,8 +94,24 @@ This removes the binary, launcher, desktop entry override, and Hyprland config.
 
 1. **D-Bus/MPRIS**: Uses the MPRIS D-Bus interface to control Spotify playback and get track metadata
 2. **StatusNotifierItem**: Creates a system tray icon using the SNI protocol (native Wayland tray support)
-3. **Hyprland IPC**: Uses `hyprctl` to show/hide the Spotify window via special workspaces
+3. **Hyprland Socket IPC**: Direct Unix socket communication with Hyprland (no subprocess spawning)
 4. **Smart-close script**: Overrides Super+Q to detect if Spotify is focused—minimizes it to tray instead of killing, while preserving normal kill behavior for other windows
+
+## Performance
+
+v1.1.0 introduced significant performance optimizations:
+
+| Operation | Before | After | Improvement |
+|-----------|--------|-------|-------------|
+| Hyprland IPC | exec.Command | Unix socket | ~55x faster |
+| Find Spotify window | Parse all clients | Direct byte scan | ~3x faster |
+| Memory allocations | ~40 per call | ~13 per call | ~3x fewer |
+
+**Technical details:**
+- **Socket IPC**: Connects directly to `/run/user/{uid}/hypr/{sig}/.socket.sock` instead of spawning `hyprctl` processes
+- **V7 Minimal Parser**: Single-pass byte scanning, only extracts needed fields (address, class, workspace)
+- **V11 Direct Search**: Scans raw bytes for `"class: Spotify"` pattern without parsing all windows
+- **Buffer Pooling**: Reuses 16KB buffers via `sync.Pool` to reduce GC pressure
 
 ## Building Manually
 

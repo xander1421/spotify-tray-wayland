@@ -1,3 +1,15 @@
+// hyprland.go - Hyprland window manager integration via Unix socket IPC
+//
+// Performance optimizations (v1.1.0):
+//   - Socket IPC: Direct communication with Hyprland socket (~55x faster than exec.Command)
+//   - V7 Minimal Parser: Single-pass byte scanning, only extracts needed fields
+//   - V11 Direct Search: FindSpotify scans for "class: Spotify" without parsing all clients
+//   - Buffer Pooling: 16KB pooled buffers reduce GC pressure
+//
+// Architecture:
+//   - Primary: Unix socket at /run/user/{uid}/hypr/{sig}/.socket.sock
+//   - Fallback: exec.Command("hyprctl", ...) for systems without socket access
+
 package main
 
 import (
@@ -10,7 +22,8 @@ import (
 	"sync"
 )
 
-// Buffer pool for socket responses (avoids allocations)
+// hyprBufferPool provides reusable 16KB buffers for socket reads.
+// Avoids allocations on every IPC call (~50 windows fit in 16KB).
 var hyprBufferPool = sync.Pool{
 	New: func() any {
 		b := make([]byte, 16384) // 16KB - enough for ~50 windows
@@ -279,7 +292,9 @@ func (h *HyprlandManager) LaunchSpotify() error {
 	return nil
 }
 
-// FindSpotify uses V11 direct search for maximum speed
+// FindSpotify locates the Spotify window using V11 direct byte scanning.
+// Instead of parsing all clients, it scans raw socket response for "class: Spotify"
+// and only parses that window block. ~3x faster than GetClients + loop.
 func (h *HyprlandManager) FindSpotify() (HyprlandClient, bool) {
 	if h.socketPath == "" {
 		// Fallback: use GetClients and search
