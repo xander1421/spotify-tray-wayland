@@ -3,6 +3,7 @@ package main
 // WindowManager abstracts window management operations (Hyprland, etc.)
 type WindowManager interface {
 	GetClients() ([]HyprlandClient, error)
+	FindSpotify() (HyprlandClient, bool)
 	MoveWindow(address, workspace string) error
 	FocusWindow(address string) error
 	CloseWindow(class string) error

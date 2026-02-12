@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +29,15 @@ func (m *MockWindowManager) GetClients() ([]HyprlandClient, error) {
 		return nil, m.GetClientsErr
 	}
 	return m.Clients, nil
+}
+
+func (m *MockWindowManager) FindSpotify() (HyprlandClient, bool) {
+	for _, c := range m.Clients {
+		if strings.EqualFold(c.Class, "spotify") {
+			return c, true
+		}
+	}
+	return HyprlandClient{}, false
 }
 
 func (m *MockWindowManager) MoveWindow(addr, workspace string) error {

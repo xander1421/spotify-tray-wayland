@@ -209,32 +209,25 @@ func (a *App) updateTooltip() {
 }
 
 func (a *App) toggleWindow() {
-	clients, err := a.wm.GetClients()
-	if err != nil {
-		log.Printf("Failed to get clients: %v", err)
+	client, found := a.wm.FindSpotify()
+	if !found {
+		// Spotify not found, launch it
+		if err := a.wm.LaunchSpotify(); err == nil {
+			go a.ensureSpotifyVisible(true)
+		}
 		return
 	}
 
-	for _, client := range clients {
-		if strings.EqualFold(client.Class, "spotify") {
-			addr := "address:" + client.Address
+	addr := "address:" + client.Address
 
-			if strings.HasPrefix(client.Workspace.Name, "special") {
-				// Show: move from special workspace to current
-				if err := a.wm.MoveWindow(addr, currentWorkspace); err == nil {
-					_ = a.wm.FocusWindow(addr)
-				}
-			} else {
-				// Hide: move to special workspace
-				_ = a.wm.MoveWindow(addr, specialWorkspace)
-			}
-			return
+	if strings.HasPrefix(client.Workspace.Name, "special") {
+		// Show: move from special workspace to current
+		if err := a.wm.MoveWindow(addr, currentWorkspace); err == nil {
+			_ = a.wm.FocusWindow(addr)
 		}
-	}
-
-	// Spotify not found, launch it
-	if err := a.wm.LaunchSpotify(); err == nil {
-		go a.ensureSpotifyVisible(true)
+	} else {
+		// Hide: move to special workspace
+		_ = a.wm.MoveWindow(addr, specialWorkspace)
 	}
 }
 
@@ -252,23 +245,19 @@ func (a *App) ensureSpotifyVisible(forceMove bool) {
 		case <-timeout:
 			return
 		case <-ticker.C:
-			clients, err := a.wm.GetClients()
-			if err != nil {
+			client, found := a.wm.FindSpotify()
+			if !found {
 				continue
 			}
 
-			for _, client := range clients {
-				if strings.EqualFold(client.Class, "spotify") {
-					addr := "address:" + client.Address
-					// If it spawned in special workspace, move it to current
-					if forceMove && strings.HasPrefix(client.Workspace.Name, "special") {
-						if err := a.wm.MoveWindow(addr, currentWorkspace); err == nil {
-							_ = a.wm.FocusWindow(addr)
-						}
-					}
-					return
+			// If it spawned in special workspace, move it to current
+			if forceMove && strings.HasPrefix(client.Workspace.Name, "special") {
+				addr := "address:" + client.Address
+				if err := a.wm.MoveWindow(addr, currentWorkspace); err == nil {
+					_ = a.wm.FocusWindow(addr)
 				}
 			}
+			return
 		}
 	}
 }
