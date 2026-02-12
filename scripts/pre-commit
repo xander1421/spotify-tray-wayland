@@ -1,0 +1,35 @@
+#!/bin/bash
+# Pre-commit hook for spotify-tray-wayland
+# Runs go build, vet, staticcheck, and nilaway before allowing commits
+#
+# Install: ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+
+set -e
+
+cd "$(git rev-parse --show-toplevel)/spotify-tray-wayland"
+
+echo "Running pre-commit checks..."
+
+echo "[1/4] go build..."
+go build ./...
+
+echo "[2/4] go vet..."
+go vet ./...
+
+echo "[3/4] staticcheck..."
+if command -v staticcheck &> /dev/null; then
+    staticcheck ./...
+else
+    echo "  staticcheck not installed, skipping"
+fi
+
+echo "[4/4] nilaway..."
+if [ -x ~/go/bin/nilaway ]; then
+    ~/go/bin/nilaway ./...
+elif command -v nilaway &> /dev/null; then
+    nilaway ./...
+else
+    echo "  nilaway not installed, skipping"
+fi
+
+echo "All checks passed!"
