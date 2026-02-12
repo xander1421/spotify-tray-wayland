@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
-	"sync"
 	"unsafe"
 )
 
@@ -318,17 +317,8 @@ func unsafeString(b []byte) string {
 }
 
 // ============================================================================
-// VERSION 5: Pooled (sync.Pool for slice reuse)
+// VERSION 5: Simple allocation (was pooled, simplified for nilaway)
 // ============================================================================
-
-// v5Pool is kept for API compatibility but parseV5Pooled now uses simple allocation
-// to satisfy nilaway static analysis. The pool approach is used in production (hyprland.go).
-var v5Pool = sync.Pool{
-	New: func() any {
-		s := make([]HyprlandClient, 0, 16)
-		return &s
-	},
-}
 
 func parseV5Pooled(data []byte) []HyprlandClient {
 	if len(data) == 0 {
