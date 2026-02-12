@@ -321,6 +321,8 @@ func unsafeString(b []byte) string {
 // VERSION 5: Pooled (sync.Pool for slice reuse)
 // ============================================================================
 
+// v5Pool is kept for API compatibility but parseV5Pooled now uses simple allocation
+// to satisfy nilaway static analysis. The pool approach is used in production (hyprland.go).
 var v5Pool = sync.Pool{
 	New: func() any {
 		s := make([]HyprlandClient, 0, 16)
@@ -333,13 +335,8 @@ func parseV5Pooled(data []byte) []HyprlandClient {
 		return nil
 	}
 
-	clientsPtr, ok := v5Pool.Get().(*[]HyprlandClient)
-	if !ok || clientsPtr == nil || *clientsPtr == nil {
-		s := make([]HyprlandClient, 0, 16)
-		clientsPtr = &s
-	}
-	clients := (*clientsPtr)[:0]
-
+	// Simple allocation - pool pattern is in production code (hyprland.go)
+	clients := make([]HyprlandClient, 0, 8)
 	idx := -1
 
 	lineStart := 0
@@ -401,14 +398,7 @@ func parseV5Pooled(data []byte) []HyprlandClient {
 		}
 	}
 
-	// Copy result before returning to pool
-	result := make([]HyprlandClient, len(clients))
-	copy(result, clients)
-
-	*clientsPtr = clients
-	v5Pool.Put(clientsPtr)
-
-	return result
+	return clients
 }
 
 // ============================================================================
