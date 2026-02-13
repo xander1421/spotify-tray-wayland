@@ -14,6 +14,7 @@ type WindowManager interface {
 type MediaPlayer interface {
 	GetMetadata() (artist, title, status string, err error)
 	Call(method string) error
+	Quit() error
 	Close()
 }
 

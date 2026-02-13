@@ -149,13 +149,8 @@ func (a *App) handleClicks() {
 }
 
 func (a *App) quitSpotify() {
-	// Pause playback first
-	_ = a.player.Call("Pause")
-	// Close window cleanly
-	_ = a.wm.CloseWindow("spotify")
-	time.Sleep(500 * time.Millisecond)
-	// Force kill if still running
-	KillSpotify()
+	// Ask Spotify to quit via MPRIS D-Bus (graceful shutdown)
+	_ = a.player.Quit()
 	systray.Quit()
 }
 

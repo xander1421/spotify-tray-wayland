@@ -16,11 +16,27 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"sync"
+	"time"
 )
+
+const (
+	// socketTimeout covers the entire socket operation (dial + write + read)
+	// Keep it short for local Unix sockets - they should respond instantly
+	socketTimeout = 500 * time.Millisecond
+
+	// maxConsecutiveFailures before attempting socket path refresh
+	maxConsecutiveFailures = 3
+)
+
+// addressRegex validates Hyprland window addresses (0x followed by hex digits)
+var addressRegex = regexp.MustCompile(`^(address:)?0x[0-9a-fA-F]+$`)
 
 // hyprBufferPool provides reusable 16KB buffers for socket reads.
 // Avoids allocations on every IPC call (~50 windows fit in 16KB).
@@ -33,7 +49,18 @@ var hyprBufferPool = sync.Pool{
 
 // HyprlandManager implements WindowManager for Hyprland using direct socket IPC
 type HyprlandManager struct {
-	socketPath string
+	mu                  sync.Mutex
+	socketPath          string
+	consecutiveFailures int
+}
+
+// validateAddress checks if an address is in the expected Hyprland format.
+// This prevents injection attacks through malformed addresses.
+func validateAddress(addr string) error {
+	if !addressRegex.MatchString(addr) {
+		return fmt.Errorf("invalid address format: %q", addr)
+	}
+	return nil
 }
 
 // NewHyprlandManager creates a new socket-based HyprlandManager
@@ -42,47 +69,105 @@ func NewHyprlandManager() *HyprlandManager {
 	return &HyprlandManager{socketPath: socketPath}
 }
 
-// findHyprlandSocket locates the Hyprland IPC socket
+// findHyprlandSocket locates the Hyprland IPC socket.
+// First tries HYPRLAND_INSTANCE_SIGNATURE, then scans for any available socket.
 func findHyprlandSocket() string {
-	sig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")
-	if sig == "" {
-		return "" // Will fall back to exec
-	}
-
-	// Try XDG_RUNTIME_DIR first (newer Hyprland), then /tmp (older)
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if runtimeDir == "" {
 		runtimeDir = fmt.Sprintf("/run/user/%d", os.Getuid())
 	}
 
-	paths := []string{
-		fmt.Sprintf("%s/hypr/%s/.socket.sock", runtimeDir, sig),
-		fmt.Sprintf("/tmp/hypr/%s/.socket.sock", sig),
+	// Try environment variable first
+	sig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")
+	if sig != "" {
+		paths := []string{
+			fmt.Sprintf("%s/hypr/%s/.socket.sock", runtimeDir, sig),
+			fmt.Sprintf("/tmp/hypr/%s/.socket.sock", sig),
+		}
+		for _, path := range paths {
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
 	}
 
-	for _, path := range paths {
-		if _, err := os.Stat(path); err == nil {
-			return path
+	// Fallback: scan for any Hyprland socket (handles restarts where env is stale)
+	hyprDirs := []string{
+		filepath.Join(runtimeDir, "hypr"),
+		"/tmp/hypr",
+	}
+
+	for _, dir := range hyprDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			sockPath := filepath.Join(dir, entry.Name(), ".socket.sock")
+			if _, err := os.Stat(sockPath); err == nil {
+				return sockPath
+			}
 		}
 	}
 
 	return "" // Will fall back to exec
 }
 
-// sendCommand sends a command to Hyprland via socket and returns response
+// refreshSocketPath re-detects the Hyprland socket path.
+// Called when consecutive socket failures suggest the path is stale.
+func (h *HyprlandManager) refreshSocketPath() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	oldPath := h.socketPath
+	h.socketPath = findHyprlandSocket()
+	h.consecutiveFailures = 0
+
+	if h.socketPath != oldPath {
+		if h.socketPath != "" {
+			log.Printf("Hyprland socket refreshed: %s", h.socketPath)
+		} else {
+			log.Println("Hyprland socket not found, using exec fallback")
+		}
+	}
+}
+
+// sendCommand sends a command to Hyprland via socket and returns response.
+// Uses timeouts on all operations to prevent indefinite blocking during suspend/resume.
+// Tracks failures and refreshes socket path if needed.
 func (h *HyprlandManager) sendCommand(cmd string) ([]byte, error) {
-	if h.socketPath == "" {
+	h.mu.Lock()
+	socketPath := h.socketPath
+	h.mu.Unlock()
+
+	if socketPath == "" {
 		return h.sendCommandExec(cmd)
 	}
 
-	conn, err := net.Dial("unix", h.socketPath)
+	// Use DialTimeout to prevent blocking if socket is unresponsive
+	conn, err := net.DialTimeout("unix", socketPath, socketTimeout)
 	if err != nil {
+		h.recordFailure()
 		// Fall back to exec on socket error
 		return h.sendCommandExec(cmd)
 	}
 	defer conn.Close()
 
+	// Set deadline for entire operation (write + read)
+	// This prevents hanging if Hyprland is frozen (e.g., during suspend)
+	if err := conn.SetDeadline(time.Now().Add(socketTimeout)); err != nil {
+		return nil, fmt.Errorf("failed to set socket deadline: %w", err)
+	}
+
 	if _, err := conn.Write([]byte(cmd)); err != nil {
+		h.recordFailure()
+		// Check if this is a timeout - fall back to exec
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return h.sendCommandExec(cmd)
+		}
 		return nil, err
 	}
 
@@ -99,6 +184,11 @@ func (h *HyprlandManager) sendCommand(cmd string) ([]byte, error) {
 		}
 		if err != nil {
 			hyprBufferPool.Put(bufPtr)
+			h.recordFailure()
+			// Check if this is a timeout - fall back to exec
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				return h.sendCommandExec(cmd)
+			}
 			return nil, err
 		}
 		if total >= len(buf) {
@@ -111,7 +201,24 @@ func (h *HyprlandManager) sendCommand(cmd string) ([]byte, error) {
 	copy(result, buf[:total])
 	hyprBufferPool.Put(bufPtr)
 
+	// Reset failure counter on success
+	h.mu.Lock()
+	h.consecutiveFailures = 0
+	h.mu.Unlock()
+
 	return result, nil
+}
+
+// recordFailure tracks consecutive socket failures and triggers refresh if needed
+func (h *HyprlandManager) recordFailure() {
+	h.mu.Lock()
+	h.consecutiveFailures++
+	shouldRefresh := h.consecutiveFailures >= maxConsecutiveFailures
+	h.mu.Unlock()
+
+	if shouldRefresh {
+		h.refreshSocketPath()
+	}
 }
 
 // sendCommandExec falls back to hyprctl for systems without socket access
@@ -243,10 +350,15 @@ func parseIntFast(b []byte) int {
 	return n
 }
 
-// MoveWindow moves a window to the specified workspace via socket
+// MoveWindow moves a window to the specified workspace via socket.
+// Validates address format to prevent injection attacks.
 func (h *HyprlandManager) MoveWindow(address, workspace string) error {
-	const maxRetries = 3
+	// Security: validate address format
+	if err := validateAddress(address); err != nil {
+		return err
+	}
 
+	const maxRetries = 3
 	cmd := fmt.Sprintf("dispatch movetoworkspacesilent %s,%s", workspace, address)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
@@ -261,8 +373,14 @@ func (h *HyprlandManager) MoveWindow(address, workspace string) error {
 	return nil
 }
 
-// FocusWindow focuses the specified window via socket
+// FocusWindow focuses the specified window via socket.
+// Validates address format to prevent injection attacks.
 func (h *HyprlandManager) FocusWindow(address string) error {
+	// Security: validate address format
+	if err := validateAddress(address); err != nil {
+		return err
+	}
+
 	cmd := fmt.Sprintf("dispatch focuswindow %s", address)
 	out, err := h.sendCommand(cmd)
 	if err != nil {
@@ -295,8 +413,13 @@ func (h *HyprlandManager) LaunchSpotify() error {
 // FindSpotify locates the Spotify window using V11 direct byte scanning.
 // Instead of parsing all clients, it scans raw socket response for "class: Spotify"
 // and only parses that window block. ~3x faster than GetClients + loop.
+// Uses timeouts to prevent blocking during suspend/resume.
 func (h *HyprlandManager) FindSpotify() (HyprlandClient, bool) {
-	if h.socketPath == "" {
+	h.mu.Lock()
+	socketPath := h.socketPath
+	h.mu.Unlock()
+
+	if socketPath == "" {
 		// Fallback: use GetClients and search
 		clients, err := h.GetClients()
 		if err != nil {
@@ -310,14 +433,21 @@ func (h *HyprlandManager) FindSpotify() (HyprlandClient, bool) {
 		return HyprlandClient{}, false
 	}
 
-	// Fast path: direct socket + V11 search
-	conn, err := net.Dial("unix", h.socketPath)
+	// Fast path: direct socket + V11 search with timeout
+	conn, err := net.DialTimeout("unix", socketPath, socketTimeout)
 	if err != nil {
+		h.recordFailure()
 		return HyprlandClient{}, false
 	}
 	defer conn.Close()
 
+	// Set deadline for entire operation
+	if err := conn.SetDeadline(time.Now().Add(socketTimeout)); err != nil {
+		return HyprlandClient{}, false
+	}
+
 	if _, err := conn.Write([]byte("clients")); err != nil {
+		h.recordFailure()
 		return HyprlandClient{}, false
 	}
 

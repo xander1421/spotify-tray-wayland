@@ -97,6 +97,23 @@ This removes the binary, launcher, desktop entry override, and Hyprland config.
 3. **Hyprland Socket IPC**: Direct Unix socket communication with Hyprland (no subprocess spawning)
 4. **Smart-close script**: Overrides Super+Q to detect if Spotify is focused—minimizes it to tray instead of killing, while preserving normal kill behavior for other windows
 
+## Security
+
+- **D-Bus method allowlist**: Only safe MPRIS methods (Play, Pause, PlayPause, Next, Previous, Stop) are permitted—dangerous methods like OpenUri or Quit from untrusted sources are blocked
+- **Address validation**: Hyprland window addresses are validated against a strict regex pattern to prevent command injection
+- **No shell commands for process control**: Uses D-Bus `org.mpris.MediaPlayer2.Quit` to terminate Spotify instead of `pkill`/`kill`—cannot accidentally affect other processes
+
+## Resilience
+
+The app is designed to survive system events that break connections:
+
+| Event | Handling |
+|-------|----------|
+| **Suspend/Resume** | Socket timeouts (500ms) prevent indefinite hangs; stale connections are detected and refreshed |
+| **D-Bus restart** | Automatic reconnection with exponential backoff (1s → 10s max) |
+| **Hyprland restart** | Socket path auto-refresh after 3 consecutive failures |
+| **Panel restart** | Tray icon auto-re-registers via `NameOwnerChanged` signal (forked systray library) |
+
 ## Performance
 
 v1.1.0 introduced significant performance optimizations:
@@ -137,8 +154,13 @@ The Go module uses:
 - Check D-Bus: `dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.freedesktop.DBus.Properties.Get string:'org.mpris.MediaPlayer2.Player' string:'Metadata'`
 
 ### Show/Hide doesn't work
-- Requires Hyprland (uses `hyprctl` commands)
+- Requires Hyprland (uses direct socket IPC)
 - Check if Spotify window is detected: `hyprctl clients | grep -i spotify`
+- Check Hyprland socket exists: `ls /run/user/$(id -u)/hypr/`
+
+### Tray disappears after panel restart
+- The app auto-re-registers with the new panel instance
+- If not working, restart the tray: `pkill -x spotify-tray-wayland && spotify-tray-wayland &`
 
 ## License
 

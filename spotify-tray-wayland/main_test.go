@@ -76,6 +76,11 @@ func (m *MockMediaPlayer) Call(method string) error {
 	return nil
 }
 
+func (m *MockMediaPlayer) Quit() error {
+	m.CallHistory = append(m.CallHistory, "Quit")
+	return nil
+}
+
 func (m *MockMediaPlayer) Close() {}
 
 // --- TOGGLE WINDOW TESTS ---
