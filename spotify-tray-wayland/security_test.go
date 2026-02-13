@@ -445,11 +445,10 @@ func (r *RaceDetectingPlayer) Call(method string) error {
 }
 
 func (r *RaceDetectingPlayer) GetMetadata() (string, string, string, error) {
-	r.mu.Lock()
-	r.mu.Unlock()
-
 	return "Artist", "Title", "Playing", nil
 }
+
+func (r *RaceDetectingPlayer) Quit() error { return nil }
 
 func (r *RaceDetectingPlayer) Close() {}
 
