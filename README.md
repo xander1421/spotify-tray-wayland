@@ -18,7 +18,7 @@ A native system tray application for Spotify on Wayland, specifically designed f
 
 ## Requirements
 
-- Hyprland (Wayland compositor)
+- Hyprland (Wayland compositor) — Lua config (0.55+) and legacy `hyprland.conf` both supported
 - Go 1.21+ (for building)
 - Spotify (official Linux client)
 - D-Bus session bus

@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -223,14 +224,29 @@ func (h *HyprlandManager) recordFailure() {
 
 // sendCommandExec falls back to hyprctl for systems without socket access
 func (h *HyprlandManager) sendCommandExec(cmd string) ([]byte, error) {
-	// Parse command for exec fallback
 	// "clients" -> hyprctl clients
-	// "dispatch movetoworkspacesilent ..." -> hyprctl dispatch movetoworkspacesilent ...
-	args := []string{}
-	for _, part := range bytes.Fields([]byte(cmd)) {
-		args = append(args, string(part))
+	// "dispatch hl.dsp.focus({ ... })" -> hyprctl dispatch "hl.dsp.focus({ ... })"
+	// Only split off the verb: Lua dispatch args contain spaces.
+	verb, rest, ok := strings.Cut(cmd, " ")
+	if !ok {
+		return exec.Command("hyprctl", verb).Output()
 	}
-	return exec.Command("hyprctl", args...).Output()
+	return exec.Command("hyprctl", verb, rest).Output()
+}
+
+func isOK(out []byte) bool { return bytes.Equal(bytes.TrimSpace(out), []byte("ok")) }
+
+// dispatch runs a Lua dispatcher (Hyprland >= 0.55, legacy syntax removed),
+// falling back to the legacy hyprlang dispatcher for older Hyprland.
+func (h *HyprlandManager) dispatch(lua, legacy string) ([]byte, error) {
+	out, err := h.sendCommand("dispatch " + lua)
+	if err == nil && isOK(out) {
+		return out, nil
+	}
+	if out2, err2 := h.sendCommand("dispatch " + legacy); err2 == nil && isOK(out2) {
+		return out2, nil
+	}
+	return out, err
 }
 
 // GetClients returns all Hyprland clients using socket IPC + V7 minimal parsing
@@ -359,11 +375,12 @@ func (h *HyprlandManager) MoveWindow(address, workspace string) error {
 	}
 
 	const maxRetries = 3
-	cmd := fmt.Sprintf("dispatch movetoworkspacesilent %s,%s", workspace, address)
+	lua := fmt.Sprintf("hl.dsp.window.move({ workspace = %q, follow = false, window = %q })", workspace, address)
+	legacy := fmt.Sprintf("movetoworkspacesilent %s,%s", workspace, address)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		out, err := h.sendCommand(cmd)
-		if err == nil && bytes.Equal(bytes.TrimSpace(out), []byte("ok")) {
+		out, err := h.dispatch(lua, legacy)
+		if err == nil && isOK(out) {
 			return nil
 		}
 		if attempt == maxRetries {
@@ -381,12 +398,11 @@ func (h *HyprlandManager) FocusWindow(address string) error {
 		return err
 	}
 
-	cmd := fmt.Sprintf("dispatch focuswindow %s", address)
-	out, err := h.sendCommand(cmd)
+	out, err := h.dispatch(fmt.Sprintf("hl.dsp.focus({ window = %q })", address), "focuswindow "+address)
 	if err != nil {
 		return fmt.Errorf("failed to focus window: %w", err)
 	}
-	if !bytes.Equal(bytes.TrimSpace(out), []byte("ok")) {
+	if !isOK(out) {
 		return fmt.Errorf("focuswindow returned: %q", string(out))
 	}
 	return nil
@@ -394,8 +410,7 @@ func (h *HyprlandManager) FocusWindow(address string) error {
 
 // CloseWindow closes a window by class via socket
 func (h *HyprlandManager) CloseWindow(class string) error {
-	cmd := fmt.Sprintf("dispatch closewindow class:%s", class)
-	_, err := h.sendCommand(cmd)
+	_, err := h.dispatch(fmt.Sprintf("hl.dsp.window.close({ window = %q })", "class:"+class), "closewindow class:"+class)
 	return err
 }
 
