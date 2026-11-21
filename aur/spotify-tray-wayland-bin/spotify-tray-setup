@@ -257,6 +257,7 @@ workspace_shortcut_conflicts() {
     for modifier in "${modifier_list[@]}"; do
         case "${modifier^^}" in
             SHIFT) (( mask |= 1 )) ;;
+            CAPS) (( mask |= 2 )) ;;
             CTRL|CONTROL) (( mask |= 4 )) ;;
             ALT|MOD1) (( mask |= 8 )) ;;
             MOD2) (( mask |= 16 )) ;;
@@ -316,9 +317,9 @@ configure_workspace_shortcut() {
     done
     create_spotify_config
     if [[ "$HYPR_LUA" == 1 ]]; then
-        printf 'hl.bind("%s + %s", hl.dsp.workspace.toggle_special("spotify")) -- Spotify Tray workspace shortcut\n' "$modifiers" "$key" >> "$snippet"
+        printf '\nhl.bind("%s + %s", hl.dsp.workspace.toggle_special("spotify")) -- Spotify Tray workspace shortcut\n' "$modifiers" "$key" >> "$snippet"
     else
-        printf 'bindd = %s, %s, Spotify Tray workspace shortcut, togglespecialworkspace, spotify\n' "$modifiers" "$key" >> "$snippet"
+        printf '\nbindd = %s, %s, Spotify Tray workspace shortcut, togglespecialworkspace, spotify\n' "$modifiers" "$key" >> "$snippet"
     fi
     load_spotify_config
     reload_hyprland
