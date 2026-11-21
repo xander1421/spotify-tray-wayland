@@ -43,7 +43,7 @@ cd spotify-tray-wayland
 ./setup.sh
 ```
 
-The setup script installs Spotify Tray to `~/.local/bin/` and sets up the Spotify desktop launcher. When run in a terminal, it offers smart close. Press Enter to keep your current shortcuts.
+The setup script installs Spotify Tray to `~/.local/bin/` and sets up the Spotify desktop launcher. When run in a terminal, it offers smart close and a Spotify workspace shortcut.
 
 ## Usage
 
@@ -60,7 +60,9 @@ After installation, just launch Spotify from your app menu. The tray icon will a
 
 ### Keyboard Shortcuts
 
-Use **Show/Hide Spotify** in the tray or run `spotify-tray-wayland toggle`. To use that action from the keyboard, add a shortcut of your choice to your Hyprland config.
+Run `spotify-tray-setup` inside Hyprland to configure keyboard controls. Setup offers Super+grave to open or close the Spotify workspace when Hyprland reports the shortcut is free. If the combination is in use, choose another shortcut or skip. Install `jq` for this check.
+
+Use **Show/Hide Spotify** in the tray or run `spotify-tray-wayland toggle` to move the Spotify window between the special workspace and your current workspace. To bind that action yourself, add a shortcut of your choice to your Hyprland config.
 
 Lua:
 
@@ -76,7 +78,7 @@ bind = <modifiers>, <key>, exec, spotify-tray-wayland toggle
 
 Specify the full path to the executable if your Hyprland session uses a different PATH.
 
-To enable smart close, run `spotify-tray-setup`, choose option 2, and confirm your close shortcut. Upgrades preserve existing smart close and remove the obsolete generated Super+M and Super+grave bindings. If the package manager could not identify your desktop user, run `spotify-tray-setup --migrate` in your session.
+To enable smart close, choose option 2 in setup and confirm your detected close shortcut. Upgrades preserve configured shortcuts and remove the old unconditional Super+M and Super+grave bindings. Run setup again to choose a workspace shortcut after upgrading. If the package manager could not identify your desktop user, run `spotify-tray-setup --migrate` in your session.
 
 ### Menu Options
 

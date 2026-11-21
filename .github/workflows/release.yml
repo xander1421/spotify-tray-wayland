@@ -240,6 +240,7 @@ jobs:
           	optdepends = spotify-launcher: official Spotify launcher
           	optdepends = spotify: Spotify client (AUR)
           	optdepends = hyprland: for window show/hide functionality
+          ${TAB}optdepends = jq: check for conflicting Hyprland shortcuts during setup
           	provides = spotify-tray-wayland
           	conflicts = spotify-tray-wayland
           	conflicts = spotify-tray-wayland-git
@@ -273,6 +274,7 @@ jobs:
           	optdepends = spotify-launcher: official Spotify launcher
           	optdepends = spotify: Spotify client (AUR)
           	optdepends = hyprland: for window show/hide functionality
+          ${TAB}optdepends = jq: check for conflicting Hyprland shortcuts during setup
           	provides = spotify-tray-wayland
           	conflicts = spotify-tray-wayland
           	conflicts = spotify-tray-wayland-bin

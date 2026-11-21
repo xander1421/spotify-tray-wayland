@@ -11,8 +11,9 @@ post_upgrade() {
     if [[ -n "$SUDO_USER" && "$SUDO_USER" != root ]]; then
         sudo -H -u "$SUDO_USER" /usr/bin/spotify-tray-setup --upgrade
     else
-        echo "Run 'spotify-tray-setup --migrate' as your desktop user to remove obsolete Spotify shortcuts."
+        echo "Run 'spotify-tray-setup --upgrade' as your desktop user to apply the keyboard migration."
     fi
+    echo "Run 'spotify-tray-setup' to choose a Spotify workspace shortcut."
 }
 
 pre_remove() {

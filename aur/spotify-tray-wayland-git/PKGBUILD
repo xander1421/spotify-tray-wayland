@@ -12,6 +12,7 @@ optdepends=(
     'spotify-launcher: official Spotify launcher'
     'spotify: Spotify client (AUR)'
     'hyprland: for window show/hide functionality'
+    'jq: check for conflicting Hyprland shortcuts during setup'
 )
 provides=('spotify-tray-wayland')
 conflicts=('spotify-tray-wayland' 'spotify-tray-wayland-bin')
