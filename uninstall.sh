@@ -37,7 +37,8 @@ fi
 # Drop the Lua loader line first, or hyprland.lua would dofile() a missing file
 sed -i '/conf\.d\/spotify\.lua/d' "$HOME/.config/hypr/hyprland.lua" 2>/dev/null
 if [[ -f "$HOME/.config/hypr/hyprland.conf" ]]; then
-    sed -i '\|^source = ~/.config/hypr/conf.d/spotify.conf$|d' "$HOME/.config/hypr/hyprland.conf"
+    sed -Ei '/^[[:space:]]*source[[:space:]]*=[[:space:]]*"?([^"]*\/)?conf\.d\/spotify\.conf"?[[:space:]]*(#.*)?$/d' \
+        "$HOME/.config/hypr/hyprland.conf"
 fi
 if rm -f "$HOME/.config/hypr/conf.d/spotify.conf" "$HOME/.config/hypr/conf.d/spotify.lua" 2>/dev/null; then
     echo "[5/6] Removed Hyprland config"

@@ -27,6 +27,13 @@ migrate_shortcuts() {
 }
 
 reload_hyprland() {
+    if [[ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+        local sockets=("${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/hypr/*/.socket.sock)
+        if (( ${#sockets[@]} == 1 )) && [[ -S "${sockets[0]}" ]]; then
+            local instance=${sockets[0]%/.socket.sock}
+            HYPRLAND_INSTANCE_SIGNATURE="${instance##*/}" hyprctl reload >/dev/null 2>&1 && return
+        fi
+    fi
     hyprctl reload >/dev/null 2>&1 || echo "Reload Hyprland to apply the changes."
 }
 
@@ -40,7 +47,7 @@ Name=Spotify
 GenericName=Music Player
 Icon=spotify
 TryExec=spotify
-Exec=$launcher %U
+Exec="$launcher" %U
 Terminal=false
 MimeType=x-scheme-handler/spotify;
 Categories=Audio;Music;Player;AudioVideo;
@@ -53,6 +60,12 @@ EOF
 
 case "${1:-}" in
     --migrate) migrate_shortcuts; exit ;;
+    --upgrade)
+        if [[ ! -e "$HOME/.local/share/applications/spotify.desktop" ]]; then
+            install_desktop_entry /usr/bin/spotify-tray-launcher
+        fi
+        migrate_shortcuts
+        exit ;;
     --install-desktop)
         install_desktop_entry "${2:-/usr/bin/spotify-tray-launcher}"
         migrate_shortcuts

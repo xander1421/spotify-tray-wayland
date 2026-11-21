@@ -28,7 +28,7 @@ pkgver() {
 build() {
     cd "${srcdir}/${pkgname}/spotify-tray-wayland"
     export CGO_ENABLED=0
-    go build -ldflags="-s -w" -o spotify-tray-wayland .
+    go build -trimpath -ldflags="-s -w" -o spotify-tray-wayland .
 }
 
 package() {

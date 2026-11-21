@@ -46,10 +46,8 @@ func main() {
 		switch os.Args[1] {
 		case "toggle":
 			if len(os.Args) == 2 {
-				ctx, cancel := context.WithCancel(context.Background())
-				defer cancel()
-				command := &App{wm: NewHyprlandManager(), ctx: ctx}
-				if err := command.toggleWindow(); err != nil {
+				command := &App{wm: NewHyprlandManager()}
+				if _, err := command.toggleWindow(); err != nil {
 					log.Fatal(err)
 				}
 				return
@@ -156,8 +154,11 @@ func (a *App) handleClicks() {
 			return
 		case <-a.mShowHide.ClickedCh:
 			go func() {
-				if err := a.toggleWindow(); err != nil {
+				launched, err := a.toggleWindow()
+				if err != nil {
 					log.Printf("Could not toggle Spotify window: %v", err)
+				} else if launched {
+					a.ensureSpotifyVisible(true)
 				}
 			}()
 		case <-a.mPrev.ClickedCh:
@@ -227,15 +228,14 @@ func (a *App) updateTooltip() {
 	}
 }
 
-func (a *App) toggleWindow() error {
+func (a *App) toggleWindow() (launched bool, err error) {
 	client, found := a.wm.FindSpotify()
 	if !found {
 		// Spotify not found, launch it
 		if err := a.wm.LaunchSpotify(); err != nil {
-			return err
+			return false, err
 		}
-		a.ensureSpotifyVisible(true)
-		return nil
+		return true, nil
 	}
 
 	addr := "address:" + client.Address
@@ -243,11 +243,11 @@ func (a *App) toggleWindow() error {
 	if strings.HasPrefix(client.Workspace.Name, "special") {
 		// Show: move from special workspace to current
 		if err := a.wm.MoveWindow(addr, currentWorkspace); err != nil {
-			return err
+			return false, err
 		}
-		return a.wm.FocusWindow(addr)
+		return false, a.wm.FocusWindow(addr)
 	}
-	return a.wm.MoveWindow(addr, specialWorkspace)
+	return false, a.wm.MoveWindow(addr, specialWorkspace)
 }
 
 // ensureSpotifyVisible waits for Spotify window and moves it if needed

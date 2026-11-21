@@ -221,7 +221,7 @@ jobs:
           GIT_SHA=$(git rev-parse --short HEAD)
 
           # === Update -bin package ===
-          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/spotify-tray-wayland-bin/PKGBUILD
+          sed -i -e "s/^pkgver=.*/pkgver=$VERSION/" -e "s/^pkgrel=.*/pkgrel=1/" aur/spotify-tray-wayland-bin/PKGBUILD
           sed -i "s/^sha256sums=.*/sha256sums=('$SETUP_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
           sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('$AMD64_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
           sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('$ARM64_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD

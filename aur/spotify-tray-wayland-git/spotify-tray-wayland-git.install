@@ -9,7 +9,7 @@ post_install() {
 
 post_upgrade() {
     if [[ -n "$SUDO_USER" && "$SUDO_USER" != root ]]; then
-        sudo -H -u "$SUDO_USER" /usr/bin/spotify-tray-setup --migrate
+        sudo -H -u "$SUDO_USER" /usr/bin/spotify-tray-setup --upgrade
     else
         echo "Run 'spotify-tray-setup --migrate' as your desktop user to remove obsolete Spotify shortcuts."
     fi
