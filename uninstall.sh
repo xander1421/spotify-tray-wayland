@@ -12,7 +12,7 @@ else
 fi
 
 # Remove binaries
-if rm -f "$HOME/.local/bin/spotify-tray-wayland" "$HOME/.local/bin/spotify-launcher.sh" 2>/dev/null; then
+if rm -f "$HOME/.local/bin/spotify-tray-wayland" "$HOME/.local/bin/spotify-launcher.sh" "$HOME/.local/bin/spotify-tray-setup" 2>/dev/null; then
     echo "[2/6] Removed binaries"
 else
     echo "[2/6] Binaries not found"
@@ -36,6 +36,9 @@ fi
 # Remove Hyprland config
 # Drop the Lua loader line first, or hyprland.lua would dofile() a missing file
 sed -i '/conf\.d\/spotify\.lua/d' "$HOME/.config/hypr/hyprland.lua" 2>/dev/null
+if [[ -f "$HOME/.config/hypr/hyprland.conf" ]]; then
+    sed -i '\|^source = ~/.config/hypr/conf.d/spotify.conf$|d' "$HOME/.config/hypr/hyprland.conf"
+fi
 if rm -f "$HOME/.config/hypr/conf.d/spotify.conf" "$HOME/.config/hypr/conf.d/spotify.lua" 2>/dev/null; then
     echo "[5/6] Removed Hyprland config"
 else
@@ -55,4 +58,3 @@ fi
 echo ""
 echo "=== Uninstall Complete ==="
 echo "Spotify will now use the system default behavior."
-echo "Note: Super+Q keybind restored to default (kill window)."

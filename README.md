@@ -13,13 +13,13 @@ A native system tray application for Spotify on Wayland, specifically designed f
   - Previous / Play-Pause / Next controls
   - Quit Spotify
 - **Window minimize**: Hide Spotify to a special workspace (like Windows minimize to tray)
-- **Smart close keybind**: Your existing "close window" keybind (auto-detected) minimizes Spotify to tray instead of killing it
+- **Optional smart close**: Use your existing close shortcut to hide Spotify to the tray
 - **Auto-start**: Tray launches automatically with Spotify
 
 ## Requirements
 
 - Hyprland (Wayland compositor) — Lua config (0.55+) and legacy `hyprland.conf` both supported
-- Go 1.21+ (for building)
+- Go 1.26+ (for building)
 - Spotify (official Linux client)
 - D-Bus session bus
 
@@ -33,7 +33,7 @@ yay -S spotify-tray-wayland-bin   # pre-built binary
 yay -S spotify-tray-wayland-git   # build from source
 ```
 
-Hyprland keybinds are configured automatically during installation.
+Run `spotify-tray-setup` as your desktop user to configure optional smart close. If the installer asks you to enable the Spotify launcher first, run `spotify-tray-setup --install-desktop`.
 
 ### Manual Installation
 
@@ -43,14 +43,7 @@ cd spotify-tray-wayland
 ./setup.sh
 ```
 
-The setup script will:
-1. Detect your existing "close window" keybind from Hyprland config
-2. Build the Go binary
-3. Install to `~/.local/bin/`
-4. Create a launcher script that starts the tray with Spotify
-5. Override the Spotify desktop entry to use the launcher
-6. Install smart-close script that minimizes Spotify instead of killing it
-7. Add Hyprland keybinds for window minimizing
+The setup script installs Spotify Tray to `~/.local/bin/` and sets up the Spotify desktop launcher. When run in a terminal, it offers smart close. Press Enter to keep your current shortcuts.
 
 ## Usage
 
@@ -67,13 +60,23 @@ After installation, just launch Spotify from your app menu. The tray icon will a
 
 ### Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| Your close keybind* | Smart close: minimize Spotify to tray / kill other windows |
-| Super+M | Minimize focused window |
-| Super+` | Show minimized windows |
+Use **Show/Hide Spotify** in the tray or run `spotify-tray-wayland toggle`. To use that action from the keyboard, add a shortcut of your choice to your Hyprland config.
 
-*Auto-detected from your Hyprland config (usually Super+Q)
+Lua:
+
+```lua
+hl.bind("<your shortcut>", hl.dsp.exec_cmd("spotify-tray-wayland toggle"))
+```
+
+Legacy `hyprland.conf`:
+
+```ini
+bind = <modifiers>, <key>, exec, spotify-tray-wayland toggle
+```
+
+Specify the full path to the executable if your Hyprland session uses a different PATH.
+
+To enable smart close, run `spotify-tray-setup`, choose option 2, and confirm your close shortcut. Upgrades preserve existing smart close and remove the obsolete generated Super+M and Super+grave bindings. If the package manager could not identify your desktop user, run `spotify-tray-setup --migrate` in your session.
 
 ### Menu Options
 
@@ -95,7 +98,7 @@ This removes the binary, launcher, desktop entry override, and Hyprland config.
 1. **D-Bus/MPRIS**: Uses the MPRIS D-Bus interface to control Spotify playback and get track metadata
 2. **StatusNotifierItem**: Creates a system tray icon using the SNI protocol (native Wayland tray support)
 3. **Hyprland Socket IPC**: Direct Unix socket communication with Hyprland (no subprocess spawning)
-4. **Smart-close script**: Overrides Super+Q to detect if Spotify is focused—minimizes it to tray instead of killing, while preserving normal kill behavior for other windows
+4. **Optional smart-close script**: Uses your confirmed close shortcut to hide focused Spotify windows and close other focused windows
 
 ## Security
 

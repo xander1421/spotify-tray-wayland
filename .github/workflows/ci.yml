@@ -155,6 +155,7 @@ jobs:
         run: |
           bash -n setup.sh
           bash -n uninstall.sh
+          bash -n aur/spotify-tray-wayland-bin/spotify-tray-setup
 
       - name: Validate PKGBUILD syntax
         run: |
