@@ -184,6 +184,29 @@ func TestToggleWindow_Launch(t *testing.T) {
 	}
 }
 
+// The `toggle` CLI must return right after launching; waiting for the window
+// (up to 10s) let repeated shortcut presses pile up and launch duplicates.
+func TestToggleWindow_LaunchDoesNotWaitForWindow(t *testing.T) {
+	mockWM := &MockWindowManager{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	testApp := &App{wm: mockWM, ctx: ctx, cancel: cancel}
+
+	done := make(chan bool, 1)
+	go func() {
+		launched, err := testApp.toggleWindow()
+		done <- launched && err == nil
+	}()
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Error("expected launched=true, err=nil")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("toggleWindow blocked after launching Spotify")
+	}
+}
+
 func TestToggleWindow_CaseInsensitive(t *testing.T) {
 	testCases := []string{"spotify", "Spotify", "SPOTIFY", "SpOtIfY"}
 

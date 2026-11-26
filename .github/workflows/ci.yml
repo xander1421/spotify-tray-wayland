@@ -162,6 +162,9 @@ jobs:
           bash -n aur/spotify-tray-wayland-bin/PKGBUILD
           bash -n aur/spotify-tray-wayland-git/PKGBUILD
 
+      - name: Run setup/uninstall regression tests
+        run: scripts/test-shell.sh
+
   build:
     name: Build
     runs-on: ubuntu-latest
