@@ -140,6 +140,7 @@ jobs:
         run: |
           bash -n setup.sh
           bash -n uninstall.sh
+          bash -n aur/spotify-tray-wayland-bin/spotify-tray-setup
 
       - name: Validate PKGBUILD syntax
         run: |
@@ -214,11 +215,14 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/v}"
           AMD64_SHA=$(sha256sum dist/spotify-tray-wayland-linux-amd64 | cut -d' ' -f1)
           ARM64_SHA=$(sha256sum dist/spotify-tray-wayland-linux-arm64 | cut -d' ' -f1)
+          SETUP_SHA=$(sha256sum aur/spotify-tray-wayland-bin/spotify-tray-setup | cut -d' ' -f1)
+          TAB=$'\t'
           GIT_REV=$(git rev-list --count HEAD)
           GIT_SHA=$(git rev-parse --short HEAD)
 
           # === Update -bin package ===
-          sed -i "s/^pkgver=.*/pkgver=$VERSION/" aur/spotify-tray-wayland-bin/PKGBUILD
+          sed -i -e "s/^pkgver=.*/pkgver=$VERSION/" -e "s/^pkgrel=.*/pkgrel=1/" aur/spotify-tray-wayland-bin/PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('$SETUP_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
           sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('$AMD64_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
           sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('$ARM64_SHA')/" aur/spotify-tray-wayland-bin/PKGBUILD
 
@@ -236,10 +240,13 @@ jobs:
           	optdepends = spotify-launcher: official Spotify launcher
           	optdepends = spotify: Spotify client (AUR)
           	optdepends = hyprland: for window show/hide functionality
+          ${TAB}optdepends = jq: check for conflicting Hyprland shortcuts during setup
           	provides = spotify-tray-wayland
           	conflicts = spotify-tray-wayland
           	conflicts = spotify-tray-wayland-git
           	options = !debug
+          ${TAB}source = spotify-tray-setup
+          ${TAB}sha256sums = $SETUP_SHA
           	source_x86_64 = spotify-tray-wayland-bin-$VERSION-x86_64::https://github.com/xander1421/spotify-tray-wayland/releases/download/v$VERSION/spotify-tray-wayland-linux-amd64
           	sha256sums_x86_64 = $AMD64_SHA
           	source_aarch64 = spotify-tray-wayland-bin-$VERSION-aarch64::https://github.com/xander1421/spotify-tray-wayland/releases/download/v$VERSION/spotify-tray-wayland-linux-arm64
@@ -267,6 +274,7 @@ jobs:
           	optdepends = spotify-launcher: official Spotify launcher
           	optdepends = spotify: Spotify client (AUR)
           	optdepends = hyprland: for window show/hide functionality
+          ${TAB}optdepends = jq: check for conflicting Hyprland shortcuts during setup
           	provides = spotify-tray-wayland
           	conflicts = spotify-tray-wayland
           	conflicts = spotify-tray-wayland-bin
@@ -305,6 +313,7 @@ jobs:
           git clone ssh://aur@aur.archlinux.org/spotify-tray-wayland-bin.git aur-bin
           cp aur/spotify-tray-wayland-bin/PKGBUILD aur-bin/
           cp aur/spotify-tray-wayland-bin/.SRCINFO aur-bin/
+          cp aur/spotify-tray-wayland-bin/spotify-tray-setup aur-bin/
           cp aur/spotify-tray-wayland-bin/*.install aur-bin/ 2>/dev/null || true
           cd aur-bin
           git config user.name "xander1421"

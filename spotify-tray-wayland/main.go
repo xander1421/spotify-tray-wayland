@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	updateInterval     = 3 * time.Second
-	specialWorkspace   = "special:spotify"
-	currentWorkspace   = "e+0" // Hyprland: relative to current
+	updateInterval   = 3 * time.Second
+	specialWorkspace = "special:spotify"
+	currentWorkspace = "e+0" // Hyprland: relative to current
 )
 
 // App holds the application state with dependency injection
@@ -41,6 +41,24 @@ var app *App
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "toggle":
+			if len(os.Args) == 2 {
+				command := &App{wm: NewHyprlandManager()}
+				if _, err := command.toggleWindow(); err != nil {
+					log.Fatal(err)
+				}
+				return
+			}
+		case "-h", "--help":
+			fmt.Println("Usage: spotify-tray-wayland [toggle]")
+			return
+		}
+		fmt.Fprintln(os.Stderr, "Usage: spotify-tray-wayland [toggle]")
+		os.Exit(2)
+	}
 
 	player, err := NewDBusPlayer()
 	if err != nil {
@@ -135,7 +153,14 @@ func (a *App) handleClicks() {
 		case <-a.ctx.Done():
 			return
 		case <-a.mShowHide.ClickedCh:
-			go a.toggleWindow()
+			go func() {
+				launched, err := a.toggleWindow()
+				if err != nil {
+					log.Printf("Could not toggle Spotify window: %v", err)
+				} else if launched {
+					a.ensureSpotifyVisible(true)
+				}
+			}()
 		case <-a.mPrev.ClickedCh:
 			go func() { _ = a.player.Call("Previous") }()
 		case <-a.mPlayPause.ClickedCh:
@@ -203,27 +228,26 @@ func (a *App) updateTooltip() {
 	}
 }
 
-func (a *App) toggleWindow() {
+func (a *App) toggleWindow() (launched bool, err error) {
 	client, found := a.wm.FindSpotify()
 	if !found {
 		// Spotify not found, launch it
-		if err := a.wm.LaunchSpotify(); err == nil {
-			go a.ensureSpotifyVisible(true)
+		if err := a.wm.LaunchSpotify(); err != nil {
+			return false, err
 		}
-		return
+		return true, nil
 	}
 
 	addr := "address:" + client.Address
 
 	if strings.HasPrefix(client.Workspace.Name, "special") {
 		// Show: move from special workspace to current
-		if err := a.wm.MoveWindow(addr, currentWorkspace); err == nil {
-			_ = a.wm.FocusWindow(addr)
+		if err := a.wm.MoveWindow(addr, currentWorkspace); err != nil {
+			return false, err
 		}
-	} else {
-		// Hide: move to special workspace
-		_ = a.wm.MoveWindow(addr, specialWorkspace)
+		return false, a.wm.FocusWindow(addr)
 	}
+	return false, a.wm.MoveWindow(addr, specialWorkspace)
 }
 
 // ensureSpotifyVisible waits for Spotify window and moves it if needed
