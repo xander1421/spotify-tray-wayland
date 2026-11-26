@@ -6,6 +6,11 @@ set -uo pipefail
 REPO=$(cd "${1:-$(dirname "$0")/..}" && pwd)
 SETUP="$REPO/aur/spotify-tray-wayland-bin/spotify-tray-setup"
 fails=0
+
+# Missing tools would make setup skip steps and look like regressions.
+for tool in jq python3 script; do
+    command -v "$tool" > /dev/null || { echo "test-shell.sh needs $tool" >&2; exit 2; }
+done
 ROOT=$(mktemp -d)
 trap 'rm -rf "$ROOT"' EXIT
 
@@ -35,7 +40,7 @@ ORIG_PATH=$PATH
 
 # Run setup interactively: stdin/stdout must be a TTY, so drive it through script(1).
 run_interactive() {
-    printf "$1" | script -qec "bash '$SETUP'" /dev/null > "$T/out" 2>&1
+    printf "$1" | script -qec "bash $(printf '%q' "$SETUP")" /dev/null > "$T/out" 2>&1
 }
 
 # --- uninstall.sh removes the source line in the forms setup.sh detects ---
