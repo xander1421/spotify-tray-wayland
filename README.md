@@ -62,7 +62,7 @@ AUR: `yay -R spotify-tray-wayland-bin` (or `-git`). Manual install: `./uninstall
 
 ## Troubleshooting
 
-- **No tray icon**: check your bar has a tray module and `pgrep -x spotify-tray-wayland` shows the process.
+- **No tray icon**: check your bar has a tray module and `pgrep -f spotify-tray-wayland` shows the process.
 - **No track info**: Spotify must be running.
 - **Show/Hide does nothing**: needs Hyprland; check `hyprctl clients | grep -i spotify`.
 
