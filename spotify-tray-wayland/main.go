@@ -103,14 +103,16 @@ func (a *App) onReady() {
 	a.mShowHide = systray.AddMenuItem("Show/Hide Spotify", "Toggle Spotify window")
 	systray.AddSeparator()
 
-	a.mPrev = systray.AddMenuItem("⏮ Previous          Scroll ↓", "Previous track (or scroll down on icon)")
+	a.mPrev = systray.AddMenuItem("⏮ Previous          Scroll ↑", "Previous track (or scroll up on icon)")
 	a.mPlayPause = systray.AddMenuItem("⏯ Play/Pause   Middle Click", "Toggle playback (or middle-click icon)")
-	a.mNext = systray.AddMenuItem("⏭ Next               Scroll ↑", "Next track (or scroll up on icon)")
+	a.mNext = systray.AddMenuItem("⏭ Next               Scroll ↓", "Next track (or scroll down on icon)")
 
 	systray.AddSeparator()
 	a.mQuit = systray.AddMenuItem("Quit", "Quit Spotify")
 
-	// Non-blocking scroll handler
+	// Non-blocking scroll handler. The systray fork names a positive delta
+	// ScrollUp (KDE sign), but Waybar sends +1 for wheel down, so on Waybar
+	// wheel down = Next and wheel up = Previous.
 	systray.SetOnScroll(func(direction systray.ScrollDirection) {
 		go func() {
 			switch direction {

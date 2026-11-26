@@ -7,7 +7,7 @@ Tray icon for the Spotify Linux client on Hyprland. Hide Spotify to the tray, co
 ## Features
 
 - **Hover**: current track
-- **Scroll**: next / previous track
+- **Scroll down / up**: next / previous track
 - **Middle-click**: play / pause
 - **Click**: menu with track info, Show/Hide, playback controls, Quit
 - **Hide to tray**: Spotify moves to a special workspace instead of closing
